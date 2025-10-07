@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ChartBar, Envelope, Eye, Mouse, Users } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
+import { getCouncilorKey } from '@/lib/utils'
 
 interface EmailMetrics {
   id: string
@@ -16,8 +17,8 @@ interface EmailMetrics {
 }
 
 export function Analytics() {
-  const [drafts] = useKV<any[]>('email-drafts', [])
-  const [distributionLists] = useKV<any[]>('distribution-lists', [])
+  const [drafts] = useKV<any[]>(getCouncilorKey('email-drafts'), [])
+  const [distributionLists] = useKV<any[]>(getCouncilorKey('distribution-lists'), [])
 
   const sentEmails = (drafts || []).filter(email => email.status === 'sent')
   

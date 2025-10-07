@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Gear, User, Bell, Shield, Trash, Plus } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
 import { toast } from 'sonner'
+import { getCouncilorKey } from '@/lib/utils'
 
 interface UserProfile {
   name: string
@@ -22,7 +23,7 @@ interface UserProfile {
 }
 
 export function Settings() {
-  const [userProfile, setUserProfile] = useKV<UserProfile>('user-profile', {
+  const [userProfile, setUserProfile] = useKV<UserProfile>(getCouncilorKey('user-profile'), {
     name: 'Councilor Smith',
     ward: 'Ward 5',
     title: 'City Councilor',
@@ -31,9 +32,9 @@ export function Settings() {
     signature: 'Best regards,\nCouncilor Smith\nWard 5 City Council'
   })
   
-  const [unsubscribedEmails, setUnsubscribedEmails] = useKV<string[]>('unsubscribed-emails', [])
-  const [emailNotifications, setEmailNotifications] = useKV<boolean>('email-notifications', true)
-  const [autoSaveDrafts, setAutoSaveDrafts] = useKV<boolean>('auto-save-drafts', true)
+  const [unsubscribedEmails, setUnsubscribedEmails] = useKV<string[]>(getCouncilorKey('unsubscribed-emails'), [])
+  const [emailNotifications, setEmailNotifications] = useKV<boolean>(getCouncilorKey('email-notifications'), true)
+  const [autoSaveDrafts, setAutoSaveDrafts] = useKV<boolean>(getCouncilorKey('auto-save-drafts'), true)
   const [newUnsubscribeEmail, setNewUnsubscribeEmail] = useState('')
 
   const defaultProfile: UserProfile = {
@@ -202,7 +203,7 @@ export function Settings() {
               Unsubscribe Management
             </CardTitle>
             <CardDescription>
-              Manage the global unsubscribe list for email compliance
+              Manage unsubscribe requests specific to this councilor's communications
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -227,7 +228,7 @@ export function Settings() {
                     Unsubscribed Emails ({(unsubscribedEmails || []).length})
                   </p>
                   <Badge variant="outline">
-                    Auto-filtered from all sends
+                    Filtered from this councilor's sends only
                   </Badge>
                 </div>
                 <Table>

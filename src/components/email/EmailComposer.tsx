@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { PaperPlaneRight, TextBolder, TextItalic, List, Link, Paperclip } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
 import { toast } from 'sonner'
+import { getCouncilorKey } from '@/lib/utils'
 
 interface Email {
   id: string
@@ -28,8 +29,9 @@ interface DistributionList {
 }
 
 export function EmailComposer() {
-  const [drafts, setDrafts] = useKV<Email[]>('email-drafts', [])
-  const [distributionLists] = useKV<DistributionList[]>('distribution-lists', [])
+  const [drafts, setDrafts] = useKV<Email[]>(getCouncilorKey('email-drafts'), [])
+  const [distributionLists] = useKV<DistributionList[]>(getCouncilorKey('distribution-lists'), [])
+  const [unsubscribedEmails] = useKV<string[]>(getCouncilorKey('unsubscribed-emails'), [])
   const [subject, setSubject] = useState('')
   const [content, setContent] = useState('')
   const [selectedLists, setSelectedLists] = useState<string[]>([])
@@ -66,6 +68,21 @@ export function EmailComposer() {
       return
     }
 
+    // Calculate total recipients after filtering unsubscribed emails
+    const selectedDistributionLists = (distributionLists || []).filter(list => selectedLists.includes(list.id))
+    const allRecipients = selectedDistributionLists.flatMap(list => list.contacts || [])
+    const activeRecipients = allRecipients.filter(contact => !(unsubscribedEmails || []).includes(contact.email))
+    
+    if (activeRecipients.length === 0) {
+      toast.error('No active recipients found after applying unsubscribe filters')
+      return
+    }
+
+    const filteredCount = allRecipients.length - activeRecipients.length
+    if (filteredCount > 0) {
+      toast.info(`${filteredCount} recipient(s) filtered due to unsubscribe requests`)
+    }
+
     const email: Email = {
       id: currentDraft || Date.now().toString(),
       subject,
@@ -91,7 +108,7 @@ export function EmailComposer() {
     setContent('')
     setSelectedLists([])
     setCurrentDraft(null)
-    toast.success('Email sent successfully!')
+    toast.success(`Email sent successfully to ${activeRecipients.length} recipient(s)!`)
   }
 
   const loadDraft = (draft: Email) => {
@@ -118,6 +135,23 @@ export function EmailComposer() {
   }
 
   const pendingDrafts = (drafts || []).filter(d => d.status === 'draft')
+
+  // Calculate recipient counts for selected lists
+  const getRecipientCounts = () => {
+    if (selectedLists.length === 0) return { total: 0, active: 0, filtered: 0 }
+    
+    const selectedDistributionLists = (distributionLists || []).filter(list => selectedLists.includes(list.id))
+    const allRecipients = selectedDistributionLists.flatMap(list => list.contacts || [])
+    const activeRecipients = allRecipients.filter(contact => !(unsubscribedEmails || []).includes(contact.email))
+    
+    return {
+      total: allRecipients.length,
+      active: activeRecipients.length,
+      filtered: allRecipients.length - activeRecipients.length
+    }
+  }
+
+  const recipientCounts = getRecipientCounts()
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -180,6 +214,16 @@ export function EmailComposer() {
                   ) : null
                 })}
               </div>
+              {selectedLists.length > 0 && (
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <p>Recipients: {recipientCounts.active} active contacts</p>
+                  {recipientCounts.filtered > 0 && (
+                    <p className="text-amber-600">
+                      {recipientCounts.filtered} contact(s) will be filtered due to unsubscribe requests
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

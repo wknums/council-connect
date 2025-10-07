@@ -9,6 +9,7 @@ import { Analytics } from '@/components/analytics/Analytics'
 import { Settings } from '@/components/settings/Settings'
 import { Toaster } from '@/components/ui/sonner'
 import { useKV } from '@github/spark/hooks'
+import { getCouncilorKey } from '@/lib/utils'
 
 interface UserProfile {
   name: string
@@ -21,7 +22,7 @@ interface UserProfile {
 
 function App() {
   const [activeTab, setActiveTab] = useState('compose')
-  const [user] = useKV<UserProfile | null>('user-profile', null)
+  const [user] = useKV<UserProfile | null>(getCouncilorKey('user-profile'), null)
 
   return (
     <div className="min-h-screen bg-background">
