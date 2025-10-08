@@ -25,6 +25,7 @@ dist-ssr
 *.sw?
 
 .env
+.venv
 **/agent-eval-report*
 packages
 pids
@@ -32,3 +33,5 @@ pids
 .devcontainer/
 
 .spark-workbench-id
+
+*.keep

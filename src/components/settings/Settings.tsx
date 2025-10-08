@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Gear, User, Bell, Shield, Trash, Plus } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
 import { toast } from 'sonner'
-import { getCouncilorKey } from '@/lib/utils'
+import { getCouncillorKey } from '@/lib/utils'
 
 interface UserProfile {
   name: string
@@ -23,27 +23,27 @@ interface UserProfile {
 }
 
 export function Settings() {
-  const [userProfile, setUserProfile] = useKV<UserProfile>(getCouncilorKey('user-profile'), {
-    name: 'Councilor Smith',
+  const [userProfile, setUserProfile] = useKV<UserProfile>(getCouncillorKey('user-profile'), {
+    name: 'Councillor Smith',
     ward: 'Ward 5',
-    title: 'City Councilor',
+    title: 'City Councillor',
     email: 'smith@city.gov',
     phone: '(555) 123-4567',
-    signature: 'Best regards,\nCouncilor Smith\nWard 5 City Council'
+    signature: 'Best regards,\nCouncillor Smith\nWard 5 City Council'
   })
   
-  const [unsubscribedEmails, setUnsubscribedEmails] = useKV<string[]>(getCouncilorKey('unsubscribed-emails'), [])
-  const [emailNotifications, setEmailNotifications] = useKV<boolean>(getCouncilorKey('email-notifications'), true)
-  const [autoSaveDrafts, setAutoSaveDrafts] = useKV<boolean>(getCouncilorKey('auto-save-drafts'), true)
+  const [unsubscribedEmails, setUnsubscribedEmails] = useKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const [emailNotifications, setEmailNotifications] = useKV<boolean>(getCouncillorKey('email-notifications'), true)
+  const [autoSaveDrafts, setAutoSaveDrafts] = useKV<boolean>(getCouncillorKey('auto-save-drafts'), true)
   const [newUnsubscribeEmail, setNewUnsubscribeEmail] = useState('')
 
   const defaultProfile: UserProfile = {
-    name: 'Councilor Smith',
+    name: 'Councillor Smith',
     ward: 'Ward 5', 
-    title: 'City Councilor',
+    title: 'City Councillor',
     email: 'smith@city.gov',
     phone: '(555) 123-4567',
-    signature: 'Best regards,\nCouncilor Smith\nWard 5 City Council'
+    signature: 'Best regards,\nCouncillor Smith\nWard 5 City Council'
   }
 
   const profile = userProfile || defaultProfile
@@ -98,7 +98,7 @@ export function Settings() {
               Profile Information
             </CardTitle>
             <CardDescription>
-              Update your councilor profile and contact information
+              Update your councillor profile and contact information
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -203,7 +203,7 @@ export function Settings() {
               Unsubscribe Management
             </CardTitle>
             <CardDescription>
-              Manage unsubscribe requests specific to this councilor's communications
+              Manage unsubscribe requests specific to this councillor's communications
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -228,7 +228,7 @@ export function Settings() {
                     Unsubscribed Emails ({(unsubscribedEmails || []).length})
                   </p>
                   <Badge variant="outline">
-                    Filtered from this councilor's sends only
+                    Filtered from this councillor's sends only
                   </Badge>
                 </div>
                 <Table>

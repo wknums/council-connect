@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Plus, Users, Trash, PencilSimple, Download, Upload } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
 import { toast } from 'sonner'
-import { getCouncilorKey } from '@/lib/utils'
+import { getCouncillorKey } from '@/lib/utils'
 
 interface Contact {
   id: string
@@ -28,8 +28,8 @@ interface DistributionList {
 }
 
 export function DistributionLists() {
-  const [distributionLists, setDistributionLists] = useKV<DistributionList[]>(getCouncilorKey('distribution-lists'), [])
-  const [unsubscribedEmails] = useKV<string[]>(getCouncilorKey('unsubscribed-emails'), [])
+  const [distributionLists, setDistributionLists] = useKV<DistributionList[]>(getCouncillorKey('distribution-lists'), [])
+  const [unsubscribedEmails] = useKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
   const [isCreating, setIsCreating] = useState(false)
   const [editingList, setEditingList] = useState<DistributionList | null>(null)
   const [newListName, setNewListName] = useState('')

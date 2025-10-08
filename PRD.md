@@ -1,10 +1,10 @@
 # Municipal Email Management System
 
-A secure, modern web application enabling city ward councilors to compose professional emails and manage constituent communications effectively.
+A secure, modern web application enabling city ward councillors to compose professional emails and manage constituent communications effectively.
 
 **Experience Qualities**:
 1. **Professional** - Clean, government-appropriate interface that instills confidence and credibility
-2. **Efficient** - Streamlined workflows that allow councilors to quickly compose and send communications  
+2. **Efficient** - Streamlined workflows that allow councillors to quickly compose and send communications  
 3. **Secure** - Clear data isolation and security indicators to protect constituent information
 
 **Complexity Level**: Complex Application (advanced functionality, accounts)
@@ -41,11 +41,11 @@ A secure, modern web application enabling city ward councilors to compose profes
 - **Success criteria**: Real-time tracking updates, clear visual metrics, exportable data
 
 ### Secure User Access
-- **Functionality**: User authentication with councilor-specific data isolation
+- **Functionality**: User authentication with councillor-specific data isolation
 - **Purpose**: Ensure data privacy and secure access to sensitive constituent information
 - **Trigger**: Application load or session timeout
 - **Progression**: Login prompt → Authentication → Role verification → Access granted to personal workspace
-- **Success criteria**: Only authorized councilors access system, data completely isolated per user
+- **Success criteria**: Only authorized councillors access system, data completely isolated per user
 
 ## Edge Case Handling
 

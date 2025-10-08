@@ -7,10 +7,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
-import { PaperPlaneRight, TextBolder, TextItalic, List, Link, Paperclip } from '@phosphor-icons/react'
+import { PaperPlaneRight, TextBolder, TextItalic, List, Link, Paperclip, Eye } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
 import { toast } from 'sonner'
-import { getCouncilorKey } from '@/lib/utils'
+import { getCouncillorKey } from '@/lib/utils'
+import { processEmailContent } from '@/lib/email-tracking'
 
 interface Email {
   id: string
@@ -20,6 +21,8 @@ interface Email {
   status: 'draft' | 'sent'
   createdAt: string
   sentAt?: string
+  totalRecipients?: number
+  processedContent?: string
 }
 
 interface DistributionList {
@@ -28,14 +31,25 @@ interface DistributionList {
   contacts: any[]
 }
 
+interface UserProfile {
+  name: string
+  ward: string
+  title: string
+  email: string
+  phone: string
+  signature: string
+}
+
 export function EmailComposer() {
-  const [drafts, setDrafts] = useKV<Email[]>(getCouncilorKey('email-drafts'), [])
-  const [distributionLists] = useKV<DistributionList[]>(getCouncilorKey('distribution-lists'), [])
-  const [unsubscribedEmails] = useKV<string[]>(getCouncilorKey('unsubscribed-emails'), [])
+  const [drafts, setDrafts] = useKV<Email[]>(getCouncillorKey('email-drafts'), [])
+  const [distributionLists] = useKV<DistributionList[]>(getCouncillorKey('distribution-lists'), [])
+  const [unsubscribedEmails] = useKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const [user] = useKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
   const [subject, setSubject] = useState('')
   const [content, setContent] = useState('')
   const [selectedLists, setSelectedLists] = useState<string[]>([])
   const [currentDraft, setCurrentDraft] = useState<string | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
 
   const saveDraft = () => {
     const draft: Email = {
@@ -83,14 +97,22 @@ export function EmailComposer() {
       toast.info(`${filteredCount} recipient(s) filtered due to unsubscribe requests`)
     }
 
+    const emailId = currentDraft || Date.now().toString()
+    
+    // Process email content with tracking and unsubscribe for preview
+    const sampleRecipient = activeRecipients[0]
+    const processedContent = processEmailContent(content, emailId, sampleRecipient.email, user || undefined)
+
     const email: Email = {
-      id: currentDraft || Date.now().toString(),
+      id: emailId,
       subject,
       content,
       selectedLists,
       status: 'sent',
       createdAt: currentDraft ? (drafts || []).find(d => d.id === currentDraft)?.createdAt || new Date().toISOString() : new Date().toISOString(),
-      sentAt: new Date().toISOString()
+      sentAt: new Date().toISOString(),
+      totalRecipients: activeRecipients.length,
+      processedContent
     }
 
     setDrafts(currentDrafts => {
@@ -104,10 +126,19 @@ export function EmailComposer() {
       return [...currentDrafts, email]
     })
 
+    // Here you would integrate with your email service provider
+    // Each recipient would get personalized content with their own unsubscribe link and tracking pixel
+    console.log('Email would be sent with tracking and unsubscribe functionality:', {
+      recipients: activeRecipients.length,
+      hasTracking: processedContent.includes('track/open'),
+      hasUnsubscribe: processedContent.includes('unsubscribe')
+    })
+
     setSubject('')
     setContent('')
     setSelectedLists([])
     setCurrentDraft(null)
+    setShowPreview(false)
     toast.success(`Email sent successfully to ${activeRecipients.length} recipient(s)!`)
   }
 
@@ -152,6 +183,21 @@ export function EmailComposer() {
   }
 
   const recipientCounts = getRecipientCounts()
+
+  // Generate preview content with tracking
+  const getPreviewContent = () => {
+    if (!content || selectedLists.length === 0) return ''
+    
+    const selectedDistributionLists = (distributionLists || []).filter(list => selectedLists.includes(list.id))
+    const allRecipients = selectedDistributionLists.flatMap(list => list.contacts || [])
+    const activeRecipients = allRecipients.filter(contact => !(unsubscribedEmails || []).includes(contact.email))
+    
+    if (activeRecipients.length === 0) return content
+    
+    const sampleRecipient = activeRecipients[0]
+    const emailId = currentDraft || 'preview'
+    return processEmailContent(content, emailId, sampleRecipient.email, user || undefined)
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -227,42 +273,70 @@ export function EmailComposer() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email-content">Email Content</Label>
-              <div className="border rounded-md">
-                <div className="flex items-center gap-1 p-2 border-b bg-muted/50">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => formatText('bold')}
-                  >
-                    <TextBolder size={16} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => formatText('italic')}
-                  >
-                    <TextItalic size={16} />
-                  </Button>
-                  <Button variant="ghost" size="sm">
-                    <List size={16} />
-                  </Button>
-                  <Button variant="ghost" size="sm">
-                    <Link size={16} />
-                  </Button>
-                  <Separator orientation="vertical" className="h-6" />
-                  <Button variant="ghost" size="sm">
-                    <Paperclip size={16} />
-                  </Button>
-                </div>
-                <Textarea
-                  id="email-content"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Write your email content here..."
-                  className="min-h-64 border-0 resize-none focus-visible:ring-0"
-                />
+              <div className="flex items-center justify-between">
+                <Label htmlFor="email-content">Email Content</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowPreview(!showPreview)}
+                  className="flex items-center gap-1"
+                >
+                  <Eye size={16} />
+                  {showPreview ? 'Edit' : 'Preview'}
+                </Button>
               </div>
+              
+              {showPreview ? (
+                <div className="border rounded-md p-4 bg-card min-h-64 max-h-96 overflow-auto">
+                  <div className="text-sm text-muted-foreground mb-3 pb-3 border-b">
+                    <p className="font-medium">Preview (with tracking & unsubscribe)</p>
+                    <p className="text-xs">This shows how recipients will see the email</p>
+                  </div>
+                  <div 
+                    className="prose prose-sm max-w-none"
+                    dangerouslySetInnerHTML={{ __html: getPreviewContent() }}
+                  />
+                </div>
+              ) : (
+                <div className="border rounded-md">
+                  <div className="flex items-center gap-1 p-2 border-b bg-muted/50">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => formatText('bold')}
+                    >
+                      <TextBolder size={16} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => formatText('italic')}
+                    >
+                      <TextItalic size={16} />
+                    </Button>
+                    <Button variant="ghost" size="sm">
+                      <List size={16} />
+                    </Button>
+                    <Button variant="ghost" size="sm">
+                      <Link size={16} />
+                    </Button>
+                    <Separator orientation="vertical" className="h-6" />
+                    <Button variant="ghost" size="sm">
+                      <Paperclip size={16} />
+                    </Button>
+                    <div className="ml-auto text-xs text-muted-foreground">
+                      Unsubscribe link & tracking will be added automatically
+                    </div>
+                  </div>
+                  <Textarea
+                    id="email-content"
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder="Write your email content here..."
+                    className="min-h-64 border-0 resize-none focus-visible:ring-0"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex justify-between">

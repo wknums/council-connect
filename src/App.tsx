@@ -1,15 +1,18 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Envelope, Users, ChartBar, Gear, Plus } from '@phosphor-icons/react'
 import { EmailComposer } from '@/components/email/EmailComposer'
+import { UnsubscribePage } from '@/components/email/UnsubscribePage'
 import { DistributionLists } from '@/components/lists/DistributionLists'
 import { Analytics } from '@/components/analytics/Analytics'
 import { Settings } from '@/components/settings/Settings'
 import { Toaster } from '@/components/ui/sonner'
+import { Logo } from '@/components/ui/Logo'
+import { AzureLogo } from '@/components/ui/AzureLogo'
 import { useKV } from '@github/spark/hooks'
-import { getCouncilorKey } from '@/lib/utils'
+import { getCouncillorKey } from '@/lib/utils'
 
 interface UserProfile {
   name: string
@@ -22,15 +25,40 @@ interface UserProfile {
 
 function App() {
   const [activeTab, setActiveTab] = useState('compose')
-  const [user] = useKV<UserProfile | null>(getCouncilorKey('user-profile'), null)
+  const [user] = useKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
+  const [isUnsubscribePage, setIsUnsubscribePage] = useState(false)
+  const [unsubscribeParams, setUnsubscribeParams] = useState<{trackingId?: string, email?: string}>({})
+
+  // Check URL for unsubscribe parameters
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const trackingId = urlParams.get('id')
+    const email = urlParams.get('email')
+    
+    if (window.location.pathname.includes('/unsubscribe') || trackingId || email) {
+      setIsUnsubscribePage(true)
+      setUnsubscribeParams({ trackingId: trackingId || undefined, email: email || undefined })
+    }
+  }, [])
+
+  // Handle unsubscribe page
+  if (isUnsubscribePage) {
+    return <UnsubscribePage {...unsubscribeParams} />
+  }
 
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card px-6 py-4">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Municipal Email System</h1>
-            <p className="text-muted-foreground">Ward Councilor Communications Portal</p>
+          <div className="flex items-center gap-3">
+            <Logo size={40} />
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Municipal Email System</h1>
+              <p className="text-muted-foreground flex items-center gap-2">
+                Ward Councillor Communications Portal - Powered by Azure
+                <AzureLogo size={40} />
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             {user && (
