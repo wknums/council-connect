@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,11 +7,22 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
-import { PaperPlaneRight, TextBolder, TextItalic, List, Link, Paperclip, Eye } from '@phosphor-icons/react'
+import { PaperPlaneRight, TextB, TextItalic, List, Link, Paperclip, Eye } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
+import { useOptionalKV } from '@/hooks/useOptionalKV'
 import { toast } from 'sonner'
 import { getCouncillorKey } from '@/lib/utils'
 import { processEmailContent } from '@/lib/email-tracking'
+import { apiClient } from '@/api/client'
+// Local minimal prettyBytes fallback to avoid type issues if types not installed
+const prettyBytes = (num: number): string => {
+  if (num < 1024) return num + ' B'
+  const units = ['KB','MB','GB']
+  let n = num / 1024
+  let u = 0
+  while (n >= 1024 && u < units.length - 1) { n /= 1024; u++ }
+  return n.toFixed(1).replace(/\.0$/, '') + ' ' + units[u]
+}
 
 interface Email {
   id: string
@@ -41,15 +52,56 @@ interface UserProfile {
 }
 
 export function EmailComposer() {
-  const [drafts, setDrafts] = useKV<Email[]>(getCouncillorKey('email-drafts'), [])
-  const [distributionLists] = useKV<DistributionList[]>(getCouncillorKey('distribution-lists'), [])
-  const [unsubscribedEmails] = useKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
-  const [user] = useKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
+  // Feature flag: when true, operate fully client-side with KV; when false, use backend API for lists.
+  const kvTestMode = (import.meta as any).env?.VITE_FE_TEST_KV === 'true'
+
+  // KV-backed state (always used for drafts; lists only when kvTestMode)
+  const [drafts, setDrafts] = useOptionalKV<Email[]>(getCouncillorKey('email-drafts'), [])
+  const [kvDistributionLists] = useOptionalKV<DistributionList[]>(getCouncillorKey('distribution-lists'), [])
+  const [unsubscribedEmails] = useOptionalKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const [user] = useOptionalKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
+
+  // API-mode distribution lists (authoritative when kvTestMode === false)
+  const [apiDistributionLists, setApiDistributionLists] = useState<DistributionList[]>([])
+
+  // Form / UI state
   const [subject, setSubject] = useState('')
   const [content, setContent] = useState('')
   const [selectedLists, setSelectedLists] = useState<string[]>([])
   const [currentDraft, setCurrentDraft] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [attachments, setAttachments] = useState<{ id: string; name: string; size: number; type: string; base64: string }[]>([])
+  const MAX_TOTAL_BYTES = 5 * 1024 * 1024 // 5MB aggregate limit (adjust as needed)
+  const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2MB single file
+
+  const onSelectAttachments = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const newItems: typeof attachments = []
+    let currentTotal = attachments.reduce((sum, a) => sum + a.size, 0)
+    for (const f of Array.from(files)) {
+      if (f.size > MAX_FILE_BYTES) {
+        toast.error(`${f.name} exceeds per-file limit (${prettyBytes(MAX_FILE_BYTES)})`)
+        continue
+      }
+      if (currentTotal + f.size > MAX_TOTAL_BYTES) {
+        toast.error(`Adding ${f.name} exceeds total limit (${prettyBytes(MAX_TOTAL_BYTES)})`)
+        continue
+      }
+      try {
+        const buf = await f.arrayBuffer()
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+        newItems.push({ id: `${Date.now()}-${f.name}-${Math.random().toString(36).slice(2)}`, name: f.name, size: f.size, type: f.type || 'application/octet-stream', base64: b64 })
+        currentTotal += f.size
+      } catch (e) {
+        toast.error(`Failed to read ${f.name}`)
+      }
+    }
+    if (newItems.length) setAttachments(prev => [...prev, ...newItems])
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id))
+  }
 
   const saveDraft = () => {
     const draft: Email = {
@@ -76,6 +128,47 @@ export function EmailComposer() {
     toast.success('Draft saved')
   }
 
+  // Backend list refresh (API mode only)
+  const refreshApiLists = useCallback(async () => {
+    if (kvTestMode) return
+    try {
+      const r = await apiClient.listDistributionLists()
+      const enriched = await Promise.all(r.items.map(async l => {
+        try {
+          const contactsResp = await apiClient.listContactsForList(l.id)
+          return { ...l, contacts: contactsResp.items }
+        } catch {
+          return { ...l, contacts: [] }
+        }
+      }))
+      setApiDistributionLists(enriched)
+    } catch (err) {
+      console.warn('Failed to load distribution lists from API', err)
+    }
+  }, [kvTestMode])
+
+  useEffect(() => {
+    if (kvTestMode) return
+    refreshApiLists()
+    const handler = () => refreshApiLists()
+    window.addEventListener('lists-updated', handler)
+    // Additional triggers: tab activation event, page visibility changes, and window focus
+    const activationHandler = () => refreshApiLists()
+    const visibilityHandler = () => {
+      if (!document.hidden) refreshApiLists()
+    }
+    const focusHandler = () => refreshApiLists()
+    window.addEventListener('email-composer-activated', activationHandler)
+    document.addEventListener('visibilitychange', visibilityHandler)
+    window.addEventListener('focus', focusHandler)
+    return () => {
+      window.removeEventListener('lists-updated', handler)
+      window.removeEventListener('email-composer-activated', activationHandler)
+      document.removeEventListener('visibilitychange', visibilityHandler)
+      window.removeEventListener('focus', focusHandler)
+    }
+  }, [kvTestMode, refreshApiLists])
+
   const sendEmail = () => {
     if (!subject.trim() || !content.trim() || selectedLists.length === 0) {
       toast.error('Please fill in all fields and select at least one distribution list')
@@ -83,11 +176,15 @@ export function EmailComposer() {
     }
 
     // Calculate total recipients after filtering unsubscribed emails
-    const selectedDistributionLists = (distributionLists || []).filter(list => selectedLists.includes(list.id))
+  const effectiveLists = kvTestMode ? (kvDistributionLists || []) : apiDistributionLists
+  const selectedDistributionLists = effectiveLists.filter(list => selectedLists.includes(list.id))
     const allRecipients = selectedDistributionLists.flatMap(list => list.contacts || [])
     const activeRecipients = allRecipients.filter(contact => !(unsubscribedEmails || []).includes(contact.email))
     
-    if (activeRecipients.length === 0) {
+    if (activeRecipients.length === 0 && !kvTestMode) {
+      // In API mode, allow send even if contacts not hydrated locally; backend will resolve recipients.
+      toast.info('Sending campaign (contacts will be resolved on server)')
+    } else if (activeRecipients.length === 0) {
       toast.error('No active recipients found after applying unsubscribe filters')
       return
     }
@@ -111,7 +208,7 @@ export function EmailComposer() {
       status: 'sent',
       createdAt: currentDraft ? (drafts || []).find(d => d.id === currentDraft)?.createdAt || new Date().toISOString() : new Date().toISOString(),
       sentAt: new Date().toISOString(),
-      totalRecipients: activeRecipients.length,
+      totalRecipients: activeRecipients.length, // May be 0 in API mode when server resolves
       processedContent
     }
 
@@ -126,19 +223,26 @@ export function EmailComposer() {
       return [...currentDrafts, email]
     })
 
-    // Here you would integrate with your email service provider
-    // Each recipient would get personalized content with their own unsubscribe link and tracking pixel
-    console.log('Email would be sent with tracking and unsubscribe functionality:', {
-      recipients: activeRecipients.length,
-      hasTracking: processedContent.includes('track/open'),
-      hasUnsubscribe: processedContent.includes('unsubscribe')
-    })
+    if (!kvTestMode) {
+      // Prepare attachment payload (strip base64 if empty)
+      const payloadAttachments = attachments.map(a => ({ name: a.name, contentType: a.type, base64: a.base64 }))
+      apiClient.createCampaign({ subject, content, listIds: selectedLists, attachments: payloadAttachments })
+        .then(() => {
+          toast.success(`Campaign queued for ${activeRecipients.length} recipient(s)`)
+        })
+        .catch(err => {
+          toast.error(`Failed to queue campaign: ${err.message}`)
+        })
+    } else {
+      console.log('KV test mode: skipping real backend send.')
+    }
 
     setSubject('')
     setContent('')
     setSelectedLists([])
     setCurrentDraft(null)
-    setShowPreview(false)
+  setShowPreview(false)
+  setAttachments([])
     toast.success(`Email sent successfully to ${activeRecipients.length} recipient(s)!`)
   }
 
@@ -171,7 +275,8 @@ export function EmailComposer() {
   const getRecipientCounts = () => {
     if (selectedLists.length === 0) return { total: 0, active: 0, filtered: 0 }
     
-    const selectedDistributionLists = (distributionLists || []).filter(list => selectedLists.includes(list.id))
+  const effectiveLists = kvTestMode ? (kvDistributionLists || []) : apiDistributionLists
+  const selectedDistributionLists = effectiveLists.filter(list => selectedLists.includes(list.id))
     const allRecipients = selectedDistributionLists.flatMap(list => list.contacts || [])
     const activeRecipients = allRecipients.filter(contact => !(unsubscribedEmails || []).includes(contact.email))
     
@@ -188,7 +293,8 @@ export function EmailComposer() {
   const getPreviewContent = () => {
     if (!content || selectedLists.length === 0) return ''
     
-    const selectedDistributionLists = (distributionLists || []).filter(list => selectedLists.includes(list.id))
+  const effectiveLists = kvTestMode ? (kvDistributionLists || []) : apiDistributionLists
+  const selectedDistributionLists = effectiveLists.filter(list => selectedLists.includes(list.id))
     const allRecipients = selectedDistributionLists.flatMap(list => list.contacts || [])
     const activeRecipients = allRecipients.filter(contact => !(unsubscribedEmails || []).includes(contact.email))
     
@@ -237,7 +343,7 @@ export function EmailComposer() {
                   <SelectValue placeholder="Select distribution lists..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {(distributionLists || []).map((list) => (
+                  {(kvTestMode ? (kvDistributionLists || []) : apiDistributionLists).map((list) => (
                     <SelectItem key={list.id} value={list.id}>
                       {list.name} ({list.contacts?.length || 0} contacts)
                     </SelectItem>
@@ -246,7 +352,8 @@ export function EmailComposer() {
               </Select>
               <div className="flex flex-wrap gap-2 mt-2">
                 {selectedLists.map((listId) => {
-                  const list = (distributionLists || []).find(l => l.id === listId)
+                  const effectiveLists = kvTestMode ? (kvDistributionLists || []) : apiDistributionLists
+                  const list = effectiveLists.find(l => l.id === listId)
                   return list ? (
                     <Badge key={listId} variant="secondary" className="flex items-center gap-1">
                       {list.name}
@@ -268,6 +375,30 @@ export function EmailComposer() {
                       {recipientCounts.filtered} contact(s) will be filtered due to unsubscribe requests
                     </p>
                   )}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="attachments" className="flex items-center gap-2">
+                Attachments
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </Label>
+              <Input id="attachments" type="file" multiple onChange={(e) => onSelectAttachments(e.target.files)} />
+              {attachments.length > 0 && (
+                <div className="border rounded-md p-2 space-y-2 bg-muted/30">
+                  <div className="text-xs text-muted-foreground flex justify-between">
+                    <span>{attachments.length} file(s) attached</span>
+                    <span>{prettyBytes(attachments.reduce((s,a)=>s+a.size,0))} / {prettyBytes(MAX_TOTAL_BYTES)}</span>
+                  </div>
+                  <ul className="text-sm space-y-1 max-h-40 overflow-auto">
+                    {attachments.map(a => (
+                      <li key={a.id} className="flex items-center justify-between gap-2">
+                        <span className="truncate" title={a.name}>{a.name} <span className="text-xs text-muted-foreground">({prettyBytes(a.size)})</span></span>
+                        <button onClick={() => removeAttachment(a.id)} className="text-destructive text-xs hover:underline">Remove</button>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
@@ -305,7 +436,7 @@ export function EmailComposer() {
                       size="sm"
                       onClick={() => formatText('bold')}
                     >
-                      <TextBolder size={16} />
+                      <TextB size={16} />
                     </Button>
                     <Button
                       variant="ghost"

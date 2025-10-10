@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Gear, User, Bell, Shield, Trash, Plus } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
+import { useOptionalKV } from '@/hooks/useOptionalKV'
 import { toast } from 'sonner'
 import { getCouncillorKey } from '@/lib/utils'
 
@@ -23,7 +24,7 @@ interface UserProfile {
 }
 
 export function Settings() {
-  const [userProfile, setUserProfile] = useKV<UserProfile>(getCouncillorKey('user-profile'), {
+  const [userProfile, setUserProfile] = useOptionalKV<UserProfile>(getCouncillorKey('user-profile'), {
     name: 'Councillor Smith',
     ward: 'Ward 5',
     title: 'City Councillor',
@@ -32,9 +33,9 @@ export function Settings() {
     signature: 'Best regards,\nCouncillor Smith\nWard 5 City Council'
   })
   
-  const [unsubscribedEmails, setUnsubscribedEmails] = useKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
-  const [emailNotifications, setEmailNotifications] = useKV<boolean>(getCouncillorKey('email-notifications'), true)
-  const [autoSaveDrafts, setAutoSaveDrafts] = useKV<boolean>(getCouncillorKey('auto-save-drafts'), true)
+  const [unsubscribedEmails, setUnsubscribedEmails] = useOptionalKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const [emailNotifications, setEmailNotifications] = useOptionalKV<boolean>(getCouncillorKey('email-notifications'), true)
+  const [autoSaveDrafts, setAutoSaveDrafts] = useOptionalKV<boolean>(getCouncillorKey('auto-save-drafts'), true)
   const [newUnsubscribeEmail, setNewUnsubscribeEmail] = useState('')
 
   const defaultProfile: UserProfile = {

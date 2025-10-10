@@ -7,6 +7,7 @@ import { Separator } from '@/components/ui/separator'
 import { CheckCircle, XCircle, Envelope } from '@phosphor-icons/react'
 import { recordUnsubscribe } from '@/lib/email-tracking'
 import { useKV } from '@github/spark/hooks'
+import { useOptionalKV } from '@/hooks/useOptionalKV'
 import { getCouncillorKey } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -20,7 +21,7 @@ export function UnsubscribePage({ trackingId, email: initialEmail }: Unsubscribe
   const [isUnsubscribed, setIsUnsubscribed] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
-  const [unsubscribedEmails, setUnsubscribedEmails] = useKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const [unsubscribedEmails, setUnsubscribedEmails] = useOptionalKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
 
   // Check if already unsubscribed
   useEffect(() => {

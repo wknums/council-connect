@@ -12,6 +12,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { Logo } from '@/components/ui/Logo'
 import { AzureLogo } from '@/components/ui/AzureLogo'
 import { useKV } from '@github/spark/hooks'
+import { useOptionalKV } from '@/hooks/useOptionalKV'
 import { getCouncillorKey } from '@/lib/utils'
 
 interface UserProfile {
@@ -25,7 +26,7 @@ interface UserProfile {
 
 function App() {
   const [activeTab, setActiveTab] = useState('compose')
-  const [user] = useKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
+  const [user] = useOptionalKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
   const [isUnsubscribePage, setIsUnsubscribePage] = useState(false)
   const [unsubscribeParams, setUnsubscribeParams] = useState<{trackingId?: string, email?: string}>({})
 
@@ -72,7 +73,12 @@ function App() {
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs value={activeTab} onValueChange={(val) => {
+          setActiveTab(val)
+          if (val === 'compose') {
+            window.dispatchEvent(new CustomEvent('email-composer-activated'))
+          }
+        }} className="w-full">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="compose" className="flex items-center gap-2">
               <Envelope size={16} />

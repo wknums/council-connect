@@ -18,11 +18,9 @@ const defaultTheme = {
     padding: "2rem",
   },
   extend: {
-    screens: {
-      coarse: { raw: "(pointer: coarse)" },
-      fine: { raw: "(pointer: fine)" },
-      pwa: { raw: "(display-mode: standalone)" },
-    },
+    // Removed experimental pointer/display-mode screens to eliminate malformed media queries in build output.
+    // If needed later, prefer manual CSS: @media (pointer: coarse) { ... } or @media (display-mode: standalone) { ... }
+    // Standard breakpoint screens can be added here (e.g. sm, md, lg) if required.
     colors: {
       neutral: {
         1: "var(--color-neutral-1)",

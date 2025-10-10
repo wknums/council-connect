@@ -1,3 +1,7 @@
 azure.cosmos
 azure.communication.email
 azure.identity 
+python-dotenv
+azure-functions
+pytest
+requests

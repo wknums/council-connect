@@ -35,3 +35,9 @@ pids
 .spark-workbench-id
 
 *.keep
+.azurite/
+
+__pycache__/
+**/*.pyc
+
+src/backend/experiments/
