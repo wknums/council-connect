@@ -28,17 +28,26 @@ function App() {
   const [activeTab, setActiveTab] = useState('compose')
   const [user] = useOptionalKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
   const [isUnsubscribePage, setIsUnsubscribePage] = useState(false)
-  const [unsubscribeParams, setUnsubscribeParams] = useState<{trackingId?: string, email?: string}>({})
+  const [unsubscribeParams, setUnsubscribeParams] = useState<{trackingId?: string, email?: string, campaignId?: string, contactId?: string, councillorId?: string}>({})
 
   // Check URL for unsubscribe parameters
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     const trackingId = urlParams.get('id')
     const email = urlParams.get('email')
+    const campaignId = urlParams.get('campaignId')
+    const contactId = urlParams.get('contactId')
+    const councillorId = urlParams.get('councillorId')
     
     if (window.location.pathname.includes('/unsubscribe') || trackingId || email) {
       setIsUnsubscribePage(true)
-      setUnsubscribeParams({ trackingId: trackingId || undefined, email: email || undefined })
+      setUnsubscribeParams({
+        trackingId: trackingId || undefined,
+        email: email || undefined,
+        campaignId: campaignId || undefined,
+        contactId: contactId || undefined,
+        councillorId: councillorId || undefined
+      })
     }
   }, [])
 

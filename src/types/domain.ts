@@ -28,13 +28,33 @@ export interface Campaign {
   sentAt?: string
   totalTargeted?: number
   totalFilteredUnsubscribed?: number
+  sentCount?: number
+  failedCount?: number
+  pendingCount?: number
 }
 
 export interface CampaignMetrics {
   campaignId: string
   totalTargeted: number
+  totalSent: number
+  totalFailed: number
+  totalPending: number
+  totalFilteredUnsubscribed: number
   totalOpens: number
+  uniqueOpens: number
   totalUnsubscribes: number
+  uniqueUnsubscribes: number
   openRate: number
   unsubscribeRate: number
+  deliveryStatusBreakdown?: Record<string, number>
+}
+
+export interface UnsubscribeEntry {
+  id: string
+  email: string
+  displayEmail?: string
+  contactId?: string
+  campaignId?: string | null
+  unsubscribedAt?: string
+  source?: string
 }

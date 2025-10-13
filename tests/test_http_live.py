@@ -23,28 +23,42 @@ def _port_open(port: int) -> bool:
 
 @pytest.fixture(scope='session')
 def functions_host():
-    if not shutil.which('func'):
-        pytest.skip('Azure Functions Core Tools (func) not installed')
     env = os.environ.copy()
     env.setdefault('APP_ENV', 'dev')
-    # Start host only if not already running
-    proc = None
-    if not _port_open(PORT):
-        proc = subprocess.Popen(['func', 'start', '--verbose'], cwd=FUNCTIONS_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        # Wait for ready signal or timeout
-        start = time.time()
-        ready = False
-        while time.time() - start < 30:
+
+    # If a host is already running (e.g. launched via scripts), reuse it and do not require Core Tools.
+    if _port_open(PORT):
+        yield
+        return
+
+    if not shutil.which('func'):
+        pytest.skip('Azure Functions Core Tools (func) not installed and no host detected on port 7071')
+
+    proc = subprocess.Popen(
+        ['func', 'start', '--verbose'],
+        cwd=FUNCTIONS_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    start = time.time()
+    ready = False
+    try:
+        while time.time() - start < 45:
             if _port_open(PORT):
                 ready = True
+                break
+            if proc.poll() is not None:
                 break
             time.sleep(1)
         if not ready:
             proc.terminate()
             pytest.skip('Functions host failed to start in time')
-    yield
-    if proc:
-        proc.terminate()
+        yield
+    finally:
+        if proc and proc.poll() is None:
+            proc.terminate()
 
 @pytest.mark.live
 def test_live_openapi(functions_host):

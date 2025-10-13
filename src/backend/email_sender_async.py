@@ -9,7 +9,7 @@ import os
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 
 try:
     from azure.communication.email import EmailClient
@@ -71,7 +71,7 @@ def _plain_text_fallback(raw: str, html: str | None) -> str:
     return re.sub(r"\n{3,}", "\n\n", txt).strip()
 
 
-async def _send_one(recipient: Dict[str, Any], subject: str, raw_body: str, campaign_doc: Dict[str, Any], attachments: List[Dict[str, str]]) -> tuple[str, bool, str | None, str | None]:
+async def _send_one(recipient: Dict[str, Any], subject: str, raw_body: str, campaign_doc: Dict[str, Any], attachments: List[Dict[str, str]]) -> Tuple[str, bool, str | None, str | None, str | None]:
     email_addr = recipient.get("email")
     if not email_addr:
         return ("", False, None, "missing-address")
@@ -106,15 +106,22 @@ async def _send_one(recipient: Dict[str, Any], subject: str, raw_body: str, camp
         poller = client.begin_send(message_payload)
         result = poller.result()
         message_id = result.get("id") if isinstance(result, dict) else getattr(result, 'id', None)
+        delivery_status: str | None = None
+        if message_id:
+            try:
+                status_response = client.get_send_status(message_id)
+                delivery_status = getattr(status_response, "status", None) or getattr(status_response, "value", None)
+            except AzureError as status_error:  # pragma: no cover - diagnostics only
+                logging.warning("[SEND][ASYNC] status poll failed email=%s msg=%s err=%s", email_addr, message_id, status_error)
         if ENABLE_SEND_DIAGNOSTICS:
-            logging.info("[SEND][ASYNC] OK email=%s campaign=%s messageId=%s", email_addr, campaign_doc.get("id"), message_id)
-        return (email_addr, True, message_id, None)
+            logging.info("[SEND][ASYNC] OK email=%s campaign=%s messageId=%s deliveryStatus=%s", email_addr, campaign_doc.get("id"), message_id, delivery_status)
+        return (email_addr, True, message_id, delivery_status, None)
     except AzureError as e:  # pragma: no cover
         logging.error("Send failed for %s: %s", email_addr, e)
-        return (email_addr, False, None, str(e))
+        return (email_addr, False, None, None, str(e))
     except Exception as e:  # pragma: no cover
         logging.exception("Unexpected failure for %s: %s", email_addr, e)
-        return (email_addr, False, None, str(e))
+        return (email_addr, False, None, None, str(e))
 
 
 async def _process_batch(batch: List[Dict[str, Any]], subject: str, body: str, sem: asyncio.Semaphore, campaign_doc: Dict[str, Any], attachments: List[Dict[str, str]]):
@@ -128,6 +135,7 @@ async def dispatch_campaign_emails_async(councillor_id: str, campaign_doc: Dict[
     if not ENABLE_EMAIL_SEND:
         campaign_doc["dispatchState"] = "simulated"
         campaign_doc["sentAt"] = _utc_iso()
+        campaign_doc.setdefault("pendingCount", campaign_doc.get("totalTargeted", 0))
         repo._upsert(campaign_doc, container_key="SentEmails" if not repo.is_dev else "_single")
         return campaign_doc
     if not SENDER_ADDRESS:
@@ -153,7 +161,7 @@ async def dispatch_campaign_emails_async(councillor_id: str, campaign_doc: Dict[
 
     sent = 0
     failed = 0
-    all_results: List[tuple[str, bool, str | None, str | None]] = []
+    all_results: List[Tuple[str, bool, str | None, str | None, str | None]] = []
     gathered = await asyncio.gather(*tasks)
     for group in gathered:
         for addr, ok, message_id, err in group:
@@ -164,18 +172,20 @@ async def dispatch_campaign_emails_async(councillor_id: str, campaign_doc: Dict[
                 failed += 1
 
     # Build address -> success map
-    status_map = {addr: (ok, mid, err) for addr, ok, mid, err in all_results if addr}
+    status_map = {addr: (ok, mid, status, err) for addr, ok, mid, status, err in all_results if addr}
     for r in items:
         addr = r.get("email")
         if addr in status_map:
-            ok, mid, err = status_map[addr]
+            ok, mid, delivery_status, err = status_map[addr]
             r["status"] = "sent" if ok else "failed"
+            if mid:
+                r["messageId"] = mid
+            if delivery_status:
+                r["deliveryStatus"] = delivery_status
+            if err:
+                r["error"] = err
             if ENABLE_SEND_DIAGNOSTICS:
-                if mid:
-                    r["messageId"] = mid
-                if err:
-                    r["error"] = err
-                logging.log(logging.INFO if ok else logging.ERROR, "[SEND][ASYNC] %s email=%s campaign=%s messageId=%s error=%s", "OK" if ok else "FAIL", addr, campaign_doc.get("id"), mid, err)
+                logging.log(logging.INFO if ok else logging.ERROR, "[SEND][ASYNC] %s email=%s campaign=%s messageId=%s deliveryStatus=%s error=%s", "OK" if ok else "FAIL", addr, campaign_doc.get("id"), mid, delivery_status, err)
         else:
             r["status"] = "failed"
         repo._upsert(r, container_key="SentEmails" if not repo.is_dev else "_single")
@@ -184,5 +194,6 @@ async def dispatch_campaign_emails_async(councillor_id: str, campaign_doc: Dict[
     campaign_doc["sentAt"] = _utc_iso()
     campaign_doc["sentCount"] = sent
     campaign_doc["failedCount"] = failed
+    campaign_doc["pendingCount"] = max(len(items) - sent - failed, 0)
     repo._upsert(campaign_doc, container_key="SentEmails" if not repo.is_dev else "_single")
     return campaign_doc

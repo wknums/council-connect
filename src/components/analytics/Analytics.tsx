@@ -8,6 +8,7 @@ import { useOptionalKV } from '@/hooks/useOptionalKV'
 import { getCouncillorKey } from '@/lib/utils'
 import { getEmailMetrics, EmailMetrics as TrackingEmailMetrics } from '@/lib/email-tracking'
 import { apiClient } from '@/api/client'
+import type { UnsubscribeEntry } from '@/types/domain'
 
 interface LocalEmailDraft {
   id: string
@@ -31,7 +32,24 @@ interface CampaignDoc {
   dispatchState?: string
   sentCount?: number
   failedCount?: number
+  pendingCount?: number
   totalTargeted?: number
+  totalFilteredUnsubscribed?: number
+}
+
+interface BackendMetricSnapshot {
+  totalTargeted: number
+  totalSent: number
+  totalFailed: number
+  totalPending: number
+  totalFilteredUnsubscribed: number
+  totalOpens: number
+  uniqueOpens: number
+  totalUnsubscribes: number
+  uniqueUnsubscribes: number
+  openRate: number
+  unsubscribeRate: number
+  deliveryStatusBreakdown?: Record<string, number>
 }
 
 export function Analytics() {
@@ -42,7 +60,8 @@ export function Analytics() {
   const [emailMetrics, setEmailMetrics] = useState<TrackingEmailMetrics[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [backendCampaigns, setBackendCampaigns] = useState<CampaignDoc[]>([])
-  const [backendMetrics, setBackendMetrics] = useState<Record<string, { openRate: number; unsubscribeRate: number; totalTargeted: number; totalOpens: number; totalUnsubscribes: number }>>({})
+  const [backendMetrics, setBackendMetrics] = useState<Record<string, BackendMetricSnapshot>>({})
+  const [backendUnsubscribes, setBackendUnsubscribes] = useState<UnsubscribeEntry[]>([])
   const pollingRef = useRef<number | null>(null)
 
   const sentEmails = (drafts || []).filter(email => email.status === 'sent')
@@ -52,28 +71,44 @@ export function Analytics() {
     if (kvTestMode) return
     try {
       setIsLoading(true)
-      const { items } = await apiClient.listCampaigns()
+      const [campaignResponse, unsubscribeResponse] = await Promise.all([
+        apiClient.listCampaigns(),
+        apiClient.listUnsubscribes()
+      ])
+      const items = campaignResponse.items
       // Basic sort by createdAt desc (API already does, but enforce client side too)
       const sorted = [...items].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
       setBackendCampaigns(sorted as CampaignDoc[])
+      const unsubscribeEntries = (unsubscribeResponse.items || []).map(entry => ({
+        ...entry,
+        displayEmail: entry.displayEmail || entry.email
+      }))
+      setBackendUnsubscribes(unsubscribeEntries)
       // Fetch metrics per campaign sequentially (small scale); could parallelize with Promise.all
-      const metricsEntries: [string, { openRate: number; unsubscribeRate: number; totalTargeted: number; totalOpens: number; totalUnsubscribes: number }][] = []
+      const metricsEntries: [string, BackendMetricSnapshot][] = []
       for (const c of sorted) {
         try {
           const m = await apiClient.getCampaignMetrics(c.id)
           metricsEntries.push([c.id, {
+            totalTargeted: m.totalTargeted || 0,
+            totalSent: m.totalSent || 0,
+            totalFailed: m.totalFailed || 0,
+            totalPending: m.totalPending || 0,
+            totalFilteredUnsubscribed: m.totalFilteredUnsubscribed || 0,
+            totalOpens: m.totalOpens || 0,
+            uniqueOpens: m.uniqueOpens || 0,
+            totalUnsubscribes: m.totalUnsubscribes || 0,
+            uniqueUnsubscribes: m.uniqueUnsubscribes || 0,
             openRate: m.openRate || 0,
             unsubscribeRate: m.unsubscribeRate || 0,
-            totalTargeted: m.totalTargeted || 0,
-            totalOpens: m.totalOpens || 0,
-            totalUnsubscribes: m.totalUnsubscribes || 0,
+            deliveryStatusBreakdown: m.deliveryStatusBreakdown || {}
           }])
         } catch (err) {
           // Log and continue; keep partial data
           console.warn('Failed fetching metrics for', c.id, err)
         }
       }
-      setBackendMetrics(Object.fromEntries(metricsEntries))
+  setBackendMetrics(Object.fromEntries(metricsEntries))
     } catch (e) {
       console.error('Failed to load backend campaigns', e)
     } finally {
@@ -122,28 +157,31 @@ export function Analytics() {
 
   // Aggregate stats: choose source depending on mode
   let totalRecipients = (distributionLists || []).reduce((total, list) => total + (list.contacts?.length || 0), 0)
-  const totalUnsubscribed = (unsubscribedEmails || []).length
-  let totalSent = 0
+  const totalUnsubscribed = kvTestMode ? (unsubscribedEmails || []).length : backendUnsubscribes.length
+  let totalSentCampaigns = 0
   let totalOpens = 0
   let totalEmailsSent = 0
   let totalUnsubscribesFromEmails = 0
   let avgOpenRate = 0
   let avgUnsubscribeRate = 0
+  const displayedUnsubscribes = kvTestMode
+    ? (unsubscribedEmails || []).map(email => ({ id: email, email, displayEmail: email, unsubscribedAt: undefined }))
+    : backendUnsubscribes
 
   if (kvTestMode) {
-    totalSent = sentEmails.length
+    totalSentCampaigns = sentEmails.length
     totalOpens = emailMetrics.reduce((t, m) => t + m.totalOpened, 0)
     totalEmailsSent = emailMetrics.reduce((t, m) => t + m.totalSent, 0)
     totalUnsubscribesFromEmails = emailMetrics.reduce((t, m) => t + m.totalUnsubscribed, 0)
     avgOpenRate = totalEmailsSent > 0 ? (totalOpens / totalEmailsSent) * 100 : 0
     avgUnsubscribeRate = totalEmailsSent > 0 ? (totalUnsubscribesFromEmails / totalEmailsSent) * 100 : 0
   } else {
-    totalSent = backendCampaigns.length
+    totalSentCampaigns = backendCampaigns.length
     for (const c of backendCampaigns) {
       const m = backendMetrics[c.id]
       if (m) {
         totalOpens += m.totalOpens
-        totalEmailsSent += m.totalTargeted
+        totalEmailsSent += (m.totalSent || m.totalTargeted)
         totalUnsubscribesFromEmails += m.totalUnsubscribes
       }
     }
@@ -178,7 +216,7 @@ export function Analytics() {
             <Envelope size={16} className="text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalSent}</div>
+            <div className="text-2xl font-bold">{totalSentCampaigns}</div>
             <p className="text-xs text-muted-foreground">
               {totalEmailsSent.toLocaleString()} total recipients
             </p>
@@ -368,12 +406,27 @@ export function Analytics() {
                       </TableCell>
                       <TableCell>{new Date(c.sentAt || c.createdAt).toLocaleDateString()}</TableCell>
                       <TableCell>
-                        {(m?.totalTargeted || 0).toLocaleString()}
-                        {typeof c.failedCount === 'number' && c.failedCount > 0 && (
-                          <span className="ml-2 text-xs text-destructive">{c.failedCount} failed</span>
-                        )}
+                        <div className="flex flex-col gap-1 leading-tight">
+                          <span>{(m?.totalSent || 0).toLocaleString()} sent</span>
+                          {(m?.totalPending || 0) > 0 && (
+                            <span className="text-xs text-muted-foreground">{(m?.totalPending || 0).toLocaleString()} pending</span>
+                          )}
+                          {(m?.totalFailed || 0) > 0 && (
+                            <span className="text-xs text-destructive">{(m?.totalFailed || 0).toLocaleString()} failed</span>
+                          )}
+                          {(m?.totalFilteredUnsubscribed || 0) > 0 && (
+                            <span className="text-xs text-muted-foreground">{(m?.totalFilteredUnsubscribed || 0).toLocaleString()} filtered</span>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell>{(m?.totalOpens || 0).toLocaleString()}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-1 leading-tight">
+                          <span>{(m?.totalOpens || 0).toLocaleString()} total</span>
+                          {(m?.uniqueOpens || 0) > 0 && (
+                            <span className="text-xs text-muted-foreground">{(m?.uniqueOpens || 0).toLocaleString()} unique</span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <Badge
                           variant={(m?.openRate || 0) > 25 ? 'default' : (m?.openRate || 0) > 15 ? 'secondary' : 'outline'}
@@ -383,17 +436,29 @@ export function Analytics() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          {m?.totalUnsubscribes || 0}
+                        <div className="flex flex-col gap-1 leading-tight">
+                          <span>{m?.totalUnsubscribes || 0}</span>
+                          {(m?.uniqueUnsubscribes || 0) > 0 && (
+                            <span className="text-xs text-muted-foreground">{(m?.uniqueUnsubscribes || 0).toLocaleString()} unique</span>
+                          )}
                           {(m?.unsubscribeRate || 0) > 2 && (
                             <Badge variant="destructive" className="text-xs">{(m?.unsubscribeRate || 0).toFixed(1)}%</Badge>
                           )}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="sm" onClick={() => fetchBackendCampaigns()}>
-                          Refresh
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => fetchBackendCampaigns()}>
+                            Refresh
+                          </Button>
+                          {m?.deliveryStatusBreakdown && Object.keys(m.deliveryStatusBreakdown).length > 0 && (
+                            <Badge variant="outline" className="text-xs font-normal">
+                              {Object.entries(m.deliveryStatusBreakdown)
+                                .map(([status, count]) => `${status}:${count}`)
+                                .join(' · ')}
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   )
@@ -420,9 +485,16 @@ export function Analytics() {
               {totalUnsubscribed} contacts have unsubscribed from your emails
             </div>
             <div className="space-y-2">
-              {(unsubscribedEmails || []).slice(0, 5).map((email, index) => (
-                <div key={index} className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded">
-                  <span className="text-sm">{email}</span>
+              {displayedUnsubscribes.slice(0, 5).map((entry) => (
+                <div key={entry.id} className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded">
+                  <div className="flex flex-col">
+                    <span className="text-sm">{entry.displayEmail || entry.email}</span>
+                    {entry.unsubscribedAt && (
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(entry.unsubscribedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
                   <Badge variant="outline" className="text-xs">
                     Unsubscribed
                   </Badge>

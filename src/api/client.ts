@@ -1,5 +1,5 @@
 /** API client abstraction (Phase 0). Falls back to no-op or local KV if needed. */
-import type { DistributionList, Contact, Campaign, CampaignMetrics } from '@/types/domain'
+import type { DistributionList, Contact, Campaign, CampaignMetrics, UnsubscribeEntry } from '@/types/domain'
 
 interface ApiClientOptions {
   baseUrl?: string
@@ -96,6 +96,33 @@ class ApiClient {
   getCampaignMetrics(campaignId: string): Promise<CampaignMetrics> {
     return this.request(`/campaigns/${campaignId}/metrics`)
   }
+
+  listUnsubscribes(): Promise<{ items: UnsubscribeEntry[] }> {
+    return this.request('/unsubscribes')
+  }
+
+  addUnsubscribe(payload: { email: string }): Promise<UnsubscribeEntry> {
+    return this.request('/unsubscribes', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  }
+
+  deleteUnsubscribe(unsubscribeId: string): Promise<{ status: string }> {
+    return this.request(`/unsubscribes/${unsubscribeId}`, { method: 'DELETE' })
+  }
+
+  deleteUnsubscribeByEmail(email: string): Promise<{ status: string }> {
+    const safe = encodeURIComponent(email)
+    return this.request(`/unsubscribes?email=${safe}`, { method: 'DELETE' })
+  }
+
+  recordUnsubscribeEvent(payload: { campaignId: string; contactId: string }): Promise<{ status: string }> {
+    return this.request('/track/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  }
 }
 
 export const apiClient = new ApiClient({
@@ -107,4 +134,4 @@ export const apiClient = new ApiClient({
   }
 })
 
-export type { DistributionList, Contact, Campaign, CampaignMetrics }
+export type { DistributionList, Contact, Campaign, CampaignMetrics, UnsubscribeEntry }

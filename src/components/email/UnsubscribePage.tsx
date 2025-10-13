@@ -6,22 +6,26 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { CheckCircle, XCircle, Envelope } from '@phosphor-icons/react'
 import { recordUnsubscribe } from '@/lib/email-tracking'
-import { useKV } from '@github/spark/hooks'
 import { useOptionalKV } from '@/hooks/useOptionalKV'
 import { getCouncillorKey } from '@/lib/utils'
 import { toast } from 'sonner'
+import { apiClient } from '@/api/client'
 
 interface UnsubscribePageProps {
   trackingId?: string
   email?: string
+  campaignId?: string
+  contactId?: string
+  councillorId?: string
 }
 
-export function UnsubscribePage({ trackingId, email: initialEmail }: UnsubscribePageProps) {
+export function UnsubscribePage({ trackingId, email: initialEmail, campaignId, contactId }: UnsubscribePageProps) {
   const [email, setEmail] = useState(initialEmail || '')
   const [isUnsubscribed, setIsUnsubscribed] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [unsubscribedEmails, setUnsubscribedEmails] = useOptionalKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const kvTestMode = (import.meta as any).env?.VITE_FE_TEST_KV === 'true'
 
   // Check if already unsubscribed
   useEffect(() => {
@@ -53,9 +57,16 @@ export function UnsubscribePage({ trackingId, email: initialEmail }: Unsubscribe
         setUnsubscribedEmails([...currentUnsubscribed, email])
       }
 
-      // Record unsubscribe event if we have tracking context
-      if (trackingId) {
-        await recordUnsubscribe(trackingId, email)
+      if (kvTestMode) {
+        if (trackingId) {
+          await recordUnsubscribe(trackingId, email)
+        }
+      } else {
+        if (campaignId && contactId) {
+          await apiClient.recordUnsubscribeEvent({ campaignId, contactId })
+        } else {
+          await apiClient.addUnsubscribe({ email })
+        }
       }
 
       setIsUnsubscribed(true)
@@ -76,6 +87,9 @@ export function UnsubscribePage({ trackingId, email: initialEmail }: Unsubscribe
       const currentUnsubscribed = unsubscribedEmails || []
       const updatedList = currentUnsubscribed.filter(e => e !== email)
       setUnsubscribedEmails(updatedList)
+      if (!kvTestMode) {
+        await apiClient.deleteUnsubscribeByEmail(email)
+      }
       setIsUnsubscribed(false)
       toast.success('Successfully resubscribed to municipal emails')
     } catch (err) {

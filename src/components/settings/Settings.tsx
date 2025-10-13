@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Gear, User, Bell, Shield, Trash, Plus } from '@phosphor-icons/react'
 import { useKV } from '@github/spark/hooks'
 import { useOptionalKV } from '@/hooks/useOptionalKV'
+import { apiClient } from '@/api/client'
+import type { UnsubscribeEntry } from '@/types/domain'
 import { toast } from 'sonner'
 import { getCouncillorKey } from '@/lib/utils'
 
@@ -33,7 +35,9 @@ export function Settings() {
     signature: 'Best regards,\nCouncillor Smith\nWard 5 City Council'
   })
   
-  const [unsubscribedEmails, setUnsubscribedEmails] = useOptionalKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const kvTestMode = (import.meta as any).env?.VITE_FE_TEST_KV === 'true'
+  const [kvUnsubscribedEmails, setKvUnsubscribedEmails] = useOptionalKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
+  const [apiUnsubscribes, setApiUnsubscribes] = useState<UnsubscribeEntry[]>([])
   const [emailNotifications, setEmailNotifications] = useOptionalKV<boolean>(getCouncillorKey('email-notifications'), true)
   const [autoSaveDrafts, setAutoSaveDrafts] = useOptionalKV<boolean>(getCouncillorKey('auto-save-drafts'), true)
   const [newUnsubscribeEmail, setNewUnsubscribeEmail] = useState('')
@@ -49,31 +53,88 @@ export function Settings() {
 
   const profile = userProfile || defaultProfile
 
+  const loadBackendUnsubscribes = useCallback(async () => {
+    if (kvTestMode) return
+    try {
+      const { items } = await apiClient.listUnsubscribes()
+      const normalized = (items || []).map(entry => ({
+        ...entry,
+        displayEmail: entry.displayEmail || entry.email
+      }))
+      setApiUnsubscribes(normalized)
+    } catch (err) {
+      console.error('Failed to load unsubscribes', err)
+      toast.error('Unable to load unsubscribe list from server')
+    }
+  }, [kvTestMode])
+
+  useEffect(() => {
+    loadBackendUnsubscribes()
+  }, [loadBackendUnsubscribes])
+
+  const unsubscribedRows = kvTestMode
+    ? (kvUnsubscribedEmails || []).map(email => ({ id: email, email, displayEmail: email }))
+    : apiUnsubscribes
+
   const saveProfile = () => {
     toast.success('Profile updated successfully')
   }
 
-  const addUnsubscribeEmail = () => {
-    if (!newUnsubscribeEmail.trim()) return
-    
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newUnsubscribeEmail)) {
+  const addUnsubscribeEmail = async () => {
+    const rawInput = newUnsubscribeEmail.trim()
+    if (!rawInput) return
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawInput)) {
       toast.error('Please enter a valid email address')
       return
     }
 
-    if ((unsubscribedEmails || []).includes(newUnsubscribeEmail)) {
-      toast.error('Email already in unsubscribe list')
+    if (kvTestMode) {
+      if ((kvUnsubscribedEmails || []).some(email => email.toLowerCase() === rawInput.toLowerCase())) {
+        toast.error('Email already in unsubscribe list')
+        return
+      }
+      setKvUnsubscribedEmails(current => [...(current || []), rawInput])
+      setNewUnsubscribeEmail('')
+      toast.success('Email added to unsubscribe list')
       return
     }
 
-    setUnsubscribedEmails(current => [...(current || []), newUnsubscribeEmail])
-    setNewUnsubscribeEmail('')
-    toast.success('Email added to unsubscribe list')
+    try {
+      const created = await apiClient.addUnsubscribe({ email: rawInput })
+      setApiUnsubscribes(prev => {
+        const deduped = prev.filter(entry => entry.id !== created.id && entry.email !== created.email)
+        return [{ ...created, displayEmail: created.displayEmail || created.email }, ...deduped]
+      })
+      await loadBackendUnsubscribes()
+      setNewUnsubscribeEmail('')
+      toast.success('Email added to unsubscribe list')
+    } catch (err) {
+      console.error('Failed to add unsubscribe email', err)
+      toast.error('Unable to add email to unsubscribe list')
+    }
   }
 
-  const removeUnsubscribeEmail = (email: string) => {
-    setUnsubscribedEmails(current => (current || []).filter(e => e !== email))
-    toast.success('Email removed from unsubscribe list')
+  const removeUnsubscribeEmail = async (entry: { id: string; email: string }) => {
+    if (kvTestMode) {
+      setKvUnsubscribedEmails(current => (current || []).filter(e => e !== entry.email))
+      toast.success('Email removed from unsubscribe list')
+      return
+    }
+
+    try {
+      const response = await apiClient.deleteUnsubscribe(entry.id)
+      if (!response?.status) {
+        // Fallback to deletion by email when id not found
+        await apiClient.deleteUnsubscribeByEmail(entry.email)
+      }
+      setApiUnsubscribes(current => current.filter(item => item.id !== entry.id && item.email !== entry.email))
+      await loadBackendUnsubscribes()
+      toast.success('Email removed from unsubscribe list')
+    } catch (err) {
+      console.error('Failed to remove unsubscribe email', err)
+      toast.error('Unable to remove email from unsubscribe list')
+    }
   }
 
   const updateProfile = (field: keyof UserProfile, value: string) => {
@@ -220,13 +281,13 @@ export function Settings() {
               </Button>
             </div>
 
-            {(unsubscribedEmails || []).length === 0 ? (
+            {unsubscribedRows.length === 0 ? (
               <p className="text-muted-foreground text-sm">No unsubscribed emails</p>
             ) : (
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-sm font-medium">
-                    Unsubscribed Emails ({(unsubscribedEmails || []).length})
+                    Unsubscribed Emails ({unsubscribedRows.length})
                   </p>
                   <Badge variant="outline">
                     Filtered from this councillor's sends only
@@ -240,14 +301,23 @@ export function Settings() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(unsubscribedEmails || []).map((email) => (
-                      <TableRow key={email}>
-                        <TableCell>{email}</TableCell>
+                    {unsubscribedRows.map((entry) => (
+                      <TableRow key={entry.id}>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span>{entry.displayEmail || entry.email}</span>
+                            {entry.unsubscribedAt && (
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(entry.unsubscribedAt).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => removeUnsubscribeEmail(email)}
+                            onClick={() => removeUnsubscribeEmail(entry)}
                           >
                             <Trash size={14} />
                           </Button>

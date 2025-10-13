@@ -73,6 +73,14 @@ OPENAPI_SPEC = {
         "/track/open": {"post": {"summary": "Record open event"}},
     "/track/pixel": {"get": {"summary": "Email open tracking pixel"}},
         "/track/unsubscribe": {"post": {"summary": "Record unsubscribe event"}},
+        "/unsubscribes": {
+            "get": {"summary": "List unsubscribed emails"},
+            "post": {"summary": "Add email to unsubscribe list"},
+            "delete": {"summary": "Remove unsubscribe entry by email"}
+        },
+        "/unsubscribes/{unsubscribeId}": {
+            "delete": {"summary": "Remove unsubscribe entry"}
+        },
         "/openapi.json": {"get": {"summary": "OpenAPI spec"}},
         "/docs": {"get": {"summary": "Docs HTML"}},
     },
@@ -251,6 +259,7 @@ async def campaigns_ori(req: func.HttpRequest) -> func.HttpResponse:
             campaign_doc["dispatchError"] = str(e)
     else:
         campaign_doc["dispatchState"] = "queued"
+    campaign_doc.setdefault("pendingCount", campaign_doc.get("totalTargeted", 0))
     # Remove transient raw attachments if present
     campaign_doc.pop("_attachments_raw", None)
     return _json(campaign_doc, 201)
@@ -295,7 +304,7 @@ async def campaigns(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Email async mode: %s", async_mode)
     if enable_inline:
         try:
-            if async_mode: # and dispatch_campaign_emails_async:
+            if async_mode and dispatch_campaign_emails_async:
                 logging.info("Dispatching campaign emails async...")
                 campaign_doc = await dispatch_campaign_emails_async(cid, campaign_doc)
             elif dispatch_campaign_emails:  # fallback sync
@@ -304,6 +313,7 @@ async def campaigns(req: func.HttpRequest) -> func.HttpResponse:
             else:
                 logging.info("Queuing campaign emails ...")
                 campaign_doc["dispatchState"] = "queued"
+                campaign_doc.setdefault("pendingCount", campaign_doc.get("totalTargeted", 0))
         except Exception as e:  # pragma: no cover
             logging.error("Email dispatch failed: %s", e)
             campaign_doc["dispatchState"] = "error"
@@ -311,6 +321,7 @@ async def campaigns(req: func.HttpRequest) -> func.HttpResponse:
     else:
         logging.info("Queuing campaign emails as inline is false ...")
         campaign_doc["dispatchState"] = "queued"
+        campaign_doc.setdefault("pendingCount", campaign_doc.get("totalTargeted", 0))
     # Remove transient raw attachments if present
     campaign_doc.pop("_attachments_raw", None)
     return _json(campaign_doc, 201)
@@ -439,3 +450,54 @@ def track_unsubscribe(req: func.HttpRequest) -> func.HttpResponse:
         return _json({"error": "campaignId & contactId required"}, 400)
     repo.record_tracking_event(cid, data["campaignId"], data["contactId"], "unsubscribe", req.headers.get("user-agent"))
     return _json({"status": "ok"})
+
+
+@app.route(route="unsubscribes", methods=["GET", "POST", "DELETE"], auth_level=func.AuthLevel.ANONYMOUS)
+def unsubscribes(req: func.HttpRequest) -> func.HttpResponse:
+    repo = CosmosRepository()
+    try:
+        cid = _require_councillor(req)
+    except ValueError as e:
+        return _json({"error": str(e)}, 400)
+
+    if req.method == "GET":
+        return _json({"items": repo.list_unsubscribes(cid)})
+
+    if req.method == "POST":
+        try:
+            data = req.get_json()
+        except Exception:  # noqa: BLE001
+            return _json({"error": "Invalid JSON"}, 400)
+        email = (data.get("email") or "").strip()
+        if not email:
+            return _json({"error": "email required"}, 400)
+        try:
+            created = repo.add_unsubscribe_email(cid, email)
+        except ValueError as err:
+            return _json({"error": str(err)}, 400)
+        return _json(created, 201)
+
+    # DELETE by email query
+    email = (req.params.get("email") or "").strip()
+    if not email:
+        return _json({"error": "email query parameter required"}, 400)
+    deleted = repo.remove_unsubscribe_by_email(cid, email)
+    if not deleted:
+        return _json({"error": "Not found"}, 404)
+    return _json({"status": "deleted"}, 200)
+
+
+@app.route(route="unsubscribes/{unsubscribeId}", methods=["DELETE"], auth_level=func.AuthLevel.ANONYMOUS)
+def delete_unsubscribe(req: func.HttpRequest) -> func.HttpResponse:
+    repo = CosmosRepository()
+    try:
+        cid = _require_councillor(req)
+    except ValueError as e:
+        return _json({"error": str(e)}, 400)
+    unsubscribe_id = req.route_params.get("unsubscribeId")
+    if not unsubscribe_id:
+        return _json({"error": "unsubscribeId missing"}, 400)
+    deleted = repo.remove_unsubscribe(cid, unsubscribe_id)
+    if not deleted:
+        return _json({"error": "Not found"}, 404)
+    return _json({"status": "deleted"}, 200)

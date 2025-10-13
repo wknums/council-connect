@@ -83,6 +83,7 @@ def dispatch_campaign_emails(councillor_id: str, campaign_doc: Dict[str, Any]) -
         # Mark campaign as simulated sent
         campaign_doc["dispatchState"] = "simulated"
         campaign_doc["sentAt"] = _utc_iso()
+        campaign_doc.setdefault("pendingCount", campaign_doc.get("totalTargeted", 0))
         return campaign_doc
     if not SENDER_ADDRESS:
         raise RuntimeError("EMAIL_SENDER not configured")
@@ -139,11 +140,20 @@ def dispatch_campaign_emails(councillor_id: str, campaign_doc: Dict[str, Any]) -
                 message_payload["attachments"] = valid_attachments
             poller = client.begin_send(message_payload)
             result = poller.result()  # Wait for completion
+            message_id = result.get("id") if isinstance(result, dict) else getattr(result, "id", None)
+            delivery_status = None
+            if message_id:
+                try:
+                    status_response = client.get_send_status(message_id)
+                    delivery_status = getattr(status_response, "status", None) or getattr(status_response, "value", None)
+                except AzureError as status_error:  # pragma: no cover - diagnostics path
+                    logging.warning("[SEND][SYNC] status poll failed email=%s msg=%s err=%s", address, message_id, status_error)
+            if message_id:
+                r["messageId"] = message_id
+            if delivery_status:
+                r["deliveryStatus"] = delivery_status
             if ENABLE_SEND_DIAGNOSTICS:
-                message_id = result.get("id") if isinstance(result, dict) else getattr(result, "id", None)
-                if message_id:
-                    r["messageId"] = message_id
-                logging.info("[SEND][SYNC] OK email=%s campaign=%s messageId=%s", address, campaign_doc.get("id"), r.get("messageId"))
+                logging.info("[SEND][SYNC] OK email=%s campaign=%s messageId=%s deliveryStatus=%s", address, campaign_doc.get("id"), r.get("messageId"), r.get("deliveryStatus"))
             r["status"] = "sent"
             sent_count += 1
         except AzureError as e:  # pragma: no cover - network path
@@ -166,5 +176,6 @@ def dispatch_campaign_emails(councillor_id: str, campaign_doc: Dict[str, Any]) -
     campaign_doc["sentAt"] = _utc_iso()
     campaign_doc["sentCount"] = sent_count
     campaign_doc["failedCount"] = fail_count
+    campaign_doc["pendingCount"] = max(len(recipients) - sent_count - fail_count, 0)
     repo._upsert(campaign_doc, container_key="SentEmails" if not repo.is_dev else "_single")
     return campaign_doc

@@ -98,6 +98,9 @@ class CampaignRecipient:
     status: str  # pending|sent|failed
     entityType: EntityType = "CampaignRecipient"
     sentAt: Optional[ISOTime] = None
+    deliveryStatus: Optional[str] = None
+    messageId: Optional[str] = None
+    deliveryError: Optional[str] = None
 
     def to_item(self) -> Dict[str, Any]:
         return asdict(self)
