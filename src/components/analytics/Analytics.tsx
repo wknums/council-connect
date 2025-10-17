@@ -281,7 +281,8 @@ export function Analytics() {
                     <TableHead>Sent Date</TableHead>
                     <TableHead>Recipients</TableHead>
                     <TableHead>Opens</TableHead>
-                    <TableHead>Open Rate</TableHead>
+                    <TableHead>Total Open Rate</TableHead>
+                    <TableHead>Unique Open Rate</TableHead>
                     <TableHead>Unsubscribes</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
@@ -338,6 +339,14 @@ export function Analytics() {
                           </Badge>
                         </TableCell>
                         <TableCell>
+                          <Badge 
+                            variant={metric.uniqueOpenRate > 25 ? "default" : metric.uniqueOpenRate > 15 ? "secondary" : "outline"}
+                            className="text-xs"
+                          >
+                            {(metric.uniqueOpenRate || 0).toFixed(1)}%
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
                           <div className="flex items-center gap-2">
                             {metric.totalUnsubscribed}
                             {metric.unsubscribeRate > 2 && (
@@ -377,7 +386,8 @@ export function Analytics() {
                   <TableHead>Sent Date</TableHead>
                   <TableHead>Recipients</TableHead>
                   <TableHead>Opens</TableHead>
-                  <TableHead>Open Rate</TableHead>
+                  <TableHead>Total Open Rate</TableHead>
+                  <TableHead>Unique Open Rate</TableHead>
                   <TableHead>Unsubscribes</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -401,6 +411,16 @@ export function Analytics() {
                             className="text-xs"
                           >
                             {c.dispatchState}
+                          </Badge>
+                        )}
+                        {!c.dispatchState && (m?.totalSent || 0) > 0 && (
+                          <Badge variant="default" className="text-xs">
+                            sent
+                          </Badge>
+                        )}
+                        {!c.dispatchState && (m?.totalPending || 0) > 0 && (m?.totalSent || 0) === 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            pending
                           </Badge>
                         )}
                       </TableCell>
@@ -433,6 +453,14 @@ export function Analytics() {
                           className="text-xs"
                         >
                           {(m?.openRate || 0).toFixed(1)}%
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={(m?.uniqueOpens && m?.totalSent ? (m.uniqueOpens / m.totalSent * 100) : 0) > 25 ? 'default' : (m?.uniqueOpens && m?.totalSent ? (m.uniqueOpens / m.totalSent * 100) : 0) > 15 ? 'secondary' : 'outline'}
+                          className="text-xs"
+                        >
+                          {(m?.uniqueOpens && m?.totalSent ? (m.uniqueOpens / m.totalSent * 100) : 0).toFixed(1)}%
                         </Badge>
                       </TableCell>
                       <TableCell>

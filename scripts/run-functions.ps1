@@ -116,6 +116,15 @@ Write-Info "Changed directory to: $FunctionsPath"
 Write-Info "AzureWebJobsStorage=$env:AzureWebJobsStorage"
 Write-Info "APP_ENV=$env:APP_ENV"
 
+# Read API_PORT from .env if no Port parameter provided
+if($Port -eq 7071 -and (Test-Path "$RepoRoot/.env")) {
+    $envApiPort = Select-String -Path "$RepoRoot/.env" -Pattern '^API_PORT=(.+)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+    if($envApiPort) {
+        $Port = [int]$envApiPort
+        Write-Info "Using API_PORT from .env: $Port"
+    }
+}
+
 # Start Functions host
 Write-Info "Starting Functions host on port $Port (Ctrl+C to stop)"
 $env:FUNCTIONS_WORKER_RUNTIME = 'python'

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": {
+      "value": "councilconnect"
+    },
+    "functionAppLocation": {
+      "value": "swedencentral"
+    },
+    "webAppName": {
+      "value": "councilconnect-munic-web"
+    },
+    "webAppPlanName": {
+      "value": "councilconnect-munic-web-plan"
+    },
+    "useExistingWebAppPlan": {
+      "value": true
+    },
+    "useExistingFunctionApp": {
+      "value": true
+    },
+    "functionAppName": {
+      "value": "councilconnect-munic-func"
+    },
+    "functionAppPlanName": {
+      "value": "ASP-councilconnectrg-bcef"
+    },
+    "useExistingFunctionAppPlan": {
+      "value": true
+    },
+    "storageAccountName": {
+      "value": "councilconnectrg87c5"
+    },
+
+    "applicationInsightsName": {
+      "value": "councilconnect-appi"
+    },
+    "logAnalyticsWorkspaceName": {
+      "value": "councilconnect-law"
+    },
+    "keyVaultName": {
+      "value": "councilconnect-kv-uk2024"
+    },
+    "useExistingWebApp": {
+      "value": true
+    },
+    "configureExistingWebApp": {
+      "value": true
+    },
+    "cosmosAccountResourceGroup": {
+      "value": "RG-MMRAG"
+    },
+    "cosmosAccountName": {
+      "value": "dev-cosmosdb-researchnlomaca4a7awm"
+    },
+    "cosmosDatabaseName": {
+      "value": "CouncillorEmailDB"
+    },
+    "cosmosDevContainerName": {
+      "value": "CouncillorEmailContainer"
+    },
+    "emailSenderAddress": {
+      "value": "DoNotReply@35db752d-d9a9-4dfa-8492-f192ca0e1176.azurecomm.net"
+    },
+    "cosmosKeySecretName": {
+      "value": "cosmos-primary-key"
+    },
+    "acsConnectionSecretName": {
+      "value": "acs-connection-string"
+    },
+    "enableInlineSend": {
+      "value": true
+    },
+    "enableAsyncSend": {
+      "value": true
+    },
+    "authMode": {
+      "value": "entra"
+    },
+    "authClientId": {
+      "value": "61b18a81-92b9-4852-82ff-66d451f110b9"
+    },
+    "authTenantId": {
+      "value": "16b3c013-d300-468d-ac64-7eda0820b6d3"
+    },
+    "authScopes": {
+      "value": "openid profile email"
+    },
+    "authAuthority": {
+      "value": "https://login.microsoftonline.com/16b3c013-d300-468d-ac64-7eda0820b6d3/v2.0"
+    },
+    "authBypass": {
+      "value": false
+    },
+    "authB2CSignUpSignInPolicy": {
+      "value": ""
+    },
+    "authB2CResetPolicy": {
+      "value": ""
+    },
+    "authB2CEditProfilePolicy": {
+      "value": ""
+    }
+  }
+}

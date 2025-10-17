@@ -1,0 +1,566 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.38.33.27573",
+      "templateHash": "17469274007188920688"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for all new resources. Defaults to the resource group location."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "Prefix applied to resource names for uniqueness and governance tagging."
+      }
+    },
+    "webAppName": {
+      "type": "string",
+      "defaultValue": "[format('{0}-web', parameters('namePrefix'))]",
+      "metadata": {
+        "description": "Globally unique name for the Web App hosting the front-end."
+      }
+    },
+    "webAppPlanName": {
+      "type": "string",
+      "defaultValue": "[format('{0}-web-plan', parameters('namePrefix'))]",
+      "metadata": {
+        "description": "Name of the App Service plan for the Web App."
+      }
+    },
+    "useExistingWebAppPlan": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set to true to reuse an existing App Service plan for the Web App instead of creating a new one."
+      }
+    },
+    "useExistingWebApp": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set to true to reuse an existing Web App instead of creating a new one."
+      }
+    },
+    "configureExistingWebApp": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Apply configuration updates (runtime, app settings, logging) when targeting an existing Web App."
+      }
+    },
+    "useExistingFunctionApp": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set to true to reuse an existing Function App instead of creating a new one."
+      }
+    },
+    "webAppPlanSku": {
+      "type": "object",
+      "defaultValue": {
+        "name": "B1",
+        "tier": "Basic",
+        "size": "B1",
+        "family": "B",
+        "capacity": 1
+      },
+      "metadata": {
+        "description": "SKU configuration object for the Web App Service plan."
+      }
+    },
+    "functionAppName": {
+      "type": "string",
+      "defaultValue": "[format('{0}-func', parameters('namePrefix'))]",
+      "metadata": {
+        "description": "Name of the Function App."
+      }
+    },
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "[toLower(replace(format('{0}sa', parameters('namePrefix')), '-', ''))]",
+      "minLength": 3,
+      "maxLength": 24,
+      "metadata": {
+        "description": "Name of the storage account backing the Function App. Must be globally unique, 3-24 lowercase characters."
+      }
+    },
+    "applicationInsightsName": {
+      "type": "string",
+      "defaultValue": "[format('{0}-appi', parameters('namePrefix'))]",
+      "metadata": {
+        "description": "Name of the Application Insights resource (workspace-based)."
+      }
+    },
+    "logAnalyticsWorkspaceName": {
+      "type": "string",
+      "defaultValue": "[format('{0}-law', parameters('namePrefix'))]",
+      "metadata": {
+        "description": "Name of the Log Analytics workspace used for centralized logging."
+      }
+    },
+    "keyVaultName": {
+      "type": "string",
+      "defaultValue": "[format('{0}-kv', parameters('namePrefix'))]",
+      "metadata": {
+        "description": "Name of the Key Vault that will store application secrets."
+      }
+    },
+    "cosmosAccountResourceGroup": {
+      "type": "string",
+      "metadata": {
+        "description": "Existing resource group that contains the Azure Cosmos DB account."
+      }
+    },
+    "cosmosAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Existing Azure Cosmos DB account name (SQL API)."
+      }
+    },
+    "cosmosDatabaseName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Cosmos DB database used by the application."
+      }
+    },
+    "cosmosDevContainerName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Cosmos DB container used for the single-container dev mode."
+      }
+    },
+    "emailSenderAddress": {
+      "type": "string",
+      "metadata": {
+        "description": "Email address configured for ACS to send from."
+      }
+    },
+    "publicBaseUrl": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Base public URL for unsubscribe and tracking links. Leave empty to default to the Web App hostname."
+      }
+    },
+    "cosmosKeySecretName": {
+      "type": "string",
+      "defaultValue": "cosmos-primary-key",
+      "metadata": {
+        "description": "Name of the Key Vault secret that will store the Cosmos DB primary key."
+      }
+    },
+    "acsConnectionSecretName": {
+      "type": "string",
+      "defaultValue": "acs-email-connection-string",
+      "metadata": {
+        "description": "Name of the Key Vault secret that will store the ACS Email connection string."
+      }
+    },
+    "emailSenderSecretName": {
+      "type": "string",
+      "defaultValue": "acs-email-from-address",
+      "metadata": {
+        "description": "Name of the Key Vault secret that will store the ACS from-address (optional, set empty to store in plain text)."
+      }
+    },
+    "appEnvironment": {
+      "type": "string",
+      "defaultValue": "production",
+      "metadata": {
+        "description": "Application environment indicator forwarded to Function App."
+      }
+    },
+    "enableInlineSend": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Toggle inline email dispatch at runtime."
+      }
+    },
+    "enableAsyncSend": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Toggle async email dispatch mode at runtime."
+      }
+    }
+  },
+  "variables": {
+    "tags": {
+      "Project": "[parameters('namePrefix')]"
+    },
+    "defaultPublicHost": "[format('https://{0}.azurewebsites.net', parameters('webAppName'))]",
+    "effectivePublicBaseUrl": "[if(empty(parameters('publicBaseUrl')), variables('defaultPublicHost'), parameters('publicBaseUrl'))]",
+    "defaultApiBaseUrl": "[format('https://{0}.azurewebsites.net/api', parameters('functionAppName'))]",
+    "webPlanId": "[if(parameters('useExistingWebAppPlan'), resourceId('Microsoft.Web/serverfarms', parameters('webAppPlanName')), resourceId('Microsoft.Web/serverfarms', parameters('webAppPlanName')))]",
+    "webAppSiteConfigProperties": {
+      "linuxFxVersion": "NODE|22-lts",
+      "ftpsState": "Disabled",
+      "minTlsVersion": "1.2",
+      "scmMinTlsVersion": "1.2"
+    },
+    "webAppAppSettings": {
+      "WEBSITE_RUN_FROM_PACKAGE": "1",
+      "SCM_DO_BUILD_DURING_DEPLOYMENT": "false",
+      "VITE_API_BASE_URL": "[variables('defaultApiBaseUrl')]",
+      "VITE_PUBLIC_BASE_URL": "[variables('effectivePublicBaseUrl')]"
+    },
+    "webAppLogConfig": {
+      "applicationLogs": {
+        "fileSystem": {
+          "level": "Information"
+        }
+      },
+      "httpLogs": {
+        "fileSystem": {
+          "enabled": true,
+          "retentionInDays": 7,
+          "retentionInMb": 50
+        }
+      },
+      "failedRequestsTracing": {
+        "enabled": true
+      },
+      "detailedErrorMessages": {
+        "enabled": true
+      }
+    },
+    "functionPlanId": "[if(parameters('useExistingWebAppPlan'), resourceId('Microsoft.Web/serverfarms', parameters('webAppPlanName')), resourceId('Microsoft.Web/serverfarms', parameters('webAppPlanName')))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2025-02-01",
+      "name": "[parameters('logAnalyticsWorkspaceName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "retentionInDays": 30,
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled",
+        "sku": {
+          "name": "PerGB2018"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[parameters('applicationInsightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2025-05-01",
+      "name": "[parameters('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "enabledForTemplateDeployment": true,
+        "enableRbacAuthorization": false,
+        "enableSoftDelete": true,
+        "softDeleteRetentionInDays": 90,
+        "publicNetworkAccess": "Enabled",
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "tenantId": "[tenant().tenantId]",
+        "accessPolicies": []
+      }
+    },
+    {
+      "condition": "[not(parameters('useExistingWebAppPlan'))]",
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2024-11-01",
+      "name": "[parameters('webAppPlanName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "kind": "linux",
+      "sku": "[parameters('webAppPlanSku')]",
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "condition": "[not(parameters('useExistingWebApp'))]",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-11-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[parameters('location')]",
+      "tags": "[union(variables('tags'), createObject('azd-service-name', 'frontend'))]",
+      "kind": "app,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "reserved": true,
+        "httpsOnly": true,
+        "serverFarmId": "[variables('webPlanId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('webAppPlanName'))]"
+      ]
+    },
+    {
+      "condition": "[not(parameters('useExistingWebApp'))]",
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'web')]",
+      "properties": "[variables('webAppSiteConfigProperties')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "condition": "[and(parameters('useExistingWebApp'), parameters('configureExistingWebApp'))]",
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'web')]",
+      "properties": "[variables('webAppSiteConfigProperties')]"
+    },
+    {
+      "condition": "[not(parameters('useExistingWebApp'))]",
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'appsettings')]",
+      "properties": "[variables('webAppAppSettings')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "condition": "[and(parameters('useExistingWebApp'), parameters('configureExistingWebApp'))]",
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'appsettings')]",
+      "properties": "[variables('webAppAppSettings')]"
+    },
+    {
+      "condition": "[not(parameters('useExistingWebApp'))]",
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'logs')]",
+      "properties": "[variables('webAppLogConfig')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "condition": "[and(parameters('useExistingWebApp'), parameters('configureExistingWebApp'))]",
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'logs')]",
+      "properties": "[variables('webAppLogConfig')]"
+    },
+    {
+      "condition": "[not(parameters('useExistingFunctionApp'))]",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-11-01",
+      "name": "[parameters('functionAppName')]",
+      "location": "[parameters('location')]",
+      "tags": "[union(variables('tags'), createObject('azd-service-name', 'api'))]",
+      "kind": "functionapp,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "serverFarmId": "[variables('functionPlanId')]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "appCommandLine": "",
+          "ftpsState": "Disabled",
+          "linuxFxVersion": "Python|3.11",
+          "minTlsVersion": "1.2",
+          "use32BitWorkerProcess": false,
+          "appSettings": [
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', parameters('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2025-01-01').keys[0].value, environment().suffixes.storage)]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~4"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "python"
+            },
+            {
+              "name": "PYTHON_VERSION",
+              "value": "3.11"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('applicationInsightsName')), '2020-02-02').InstrumentationKey]"
+            },
+            {
+              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('applicationInsightsName')), '2020-02-02').ConnectionString]"
+            },
+            {
+              "name": "WEBSITE_RUN_FROM_PACKAGE",
+              "value": "1"
+            },
+            {
+              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', parameters('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2025-01-01').keys[0].value, environment().suffixes.storage)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTSHARE",
+              "value": "[toLower(replace(format('{0}-content', parameters('functionAppName')), '_', '-'))]"
+            },
+            {
+              "name": "APP_ENV",
+              "value": "[parameters('appEnvironment')]"
+            },
+            {
+              "name": "ENABLE_INLINE_SEND",
+              "value": "[string(parameters('enableInlineSend'))]"
+            },
+            {
+              "name": "ENABLE_ASYNC_SEND",
+              "value": "[string(parameters('enableAsyncSend'))]"
+            },
+            {
+              "name": "TRACKING_BASE_URL",
+              "value": "[variables('effectivePublicBaseUrl')]"
+            },
+            {
+              "name": "UNSUBSCRIBE_BASE_URL",
+              "value": "[variables('effectivePublicBaseUrl')]"
+            },
+            {
+              "name": "PUBLIC_BASE_URL",
+              "value": "[variables('effectivePublicBaseUrl')]"
+            },
+            {
+              "name": "COSMOS_DB_NAME",
+              "value": "[parameters('cosmosDatabaseName')]"
+            },
+            {
+              "name": "COSMOS_ONE_CONTAINER_NAME",
+              "value": "[parameters('cosmosDevContainerName')]"
+            },
+            {
+              "name": "COSMOS_ENDPOINT",
+              "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('cosmosAccountResourceGroup')), 'Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), '2025-04-15').documentEndpoint]"
+            },
+            {
+              "name": "EMAIL_SENDER",
+              "value": "[if(empty(parameters('emailSenderSecretName')), parameters('emailSenderAddress'), format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2025-05-01').vaultUri, parameters('emailSenderSecretName')))]"
+            },
+            {
+              "name": "ACS_CONNECTION_STRING",
+              "value": "[format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2025-05-01').vaultUri, parameters('acsConnectionSecretName'))]"
+            },
+            {
+              "name": "COSMOS_KEY",
+              "value": "[format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2025-05-01').vaultUri, parameters('cosmosKeySecretName'))]"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', parameters('applicationInsightsName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', parameters('webAppPlanName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/accessPolicies",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/{1}', parameters('keyVaultName'), 'add')]",
+      "properties": {
+        "accessPolicies": [
+          {
+            "tenantId": "[tenant().tenantId]",
+            "objectId": "[if(parameters('useExistingFunctionApp'), reference(resourceId('Microsoft.Web/sites', parameters('functionAppName')), '2024-11-01', 'full'), reference(resourceId('Microsoft.Web/sites', parameters('functionAppName')), '2024-11-01', 'full')).identity.principalId]",
+            "permissions": {
+              "secrets": [
+                "Get",
+                "List"
+              ]
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('functionAppName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Insights/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "scope": "[format('Microsoft.KeyVault/vaults/{0}', parameters('keyVaultName'))]",
+      "name": "kv-logs",
+      "properties": {
+        "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]",
+        "logs": [
+          {
+            "category": "AuditEvent",
+            "enabled": true,
+            "retentionPolicy": {
+              "enabled": false,
+              "days": 0
+            }
+          }
+        ],
+        "metrics": [
+          {
+            "category": "AllMetrics",
+            "enabled": true,
+            "retentionPolicy": {
+              "enabled": false,
+              "days": 0
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+      ],
+      "metadata": {
+        "description": "Static Web App hosting the React front-end."
+      }
+    }
+  ],
+  "outputs": {
+    "webAppHostname": {
+      "type": "string",
+      "value": "[format('{0}.azurewebsites.net', parameters('webAppName'))]"
+    },
+    "functionAppHostname": {
+      "type": "string",
+      "value": "[if(parameters('useExistingFunctionApp'), reference(resourceId('Microsoft.Web/sites', parameters('functionAppName')), '2024-11-01', 'full'), reference(resourceId('Microsoft.Web/sites', parameters('functionAppName')), '2024-11-01', 'full')).properties.defaultHostName]"
+    },
+    "keyVaultUri": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2025-05-01').vaultUri]"
+    },
+    "cosmosAccountEndpoint": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('cosmosAccountResourceGroup')), 'Microsoft.DocumentDB/databaseAccounts', parameters('cosmosAccountName')), '2025-04-15').documentEndpoint]"
+    }
+  }
+}

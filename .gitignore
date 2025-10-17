@@ -24,7 +24,7 @@ dist-ssr
 *.sln
 *.sw?
 
-.env
+.env*
 .venv
 **/agent-eval-report*
 packages
@@ -41,3 +41,12 @@ __pycache__/
 **/*.pyc
 
 src/backend/experiments/
+scripts/setup-entra-auth.ps1
+
+# Campaign data fix scripts (may contain sensitive connection strings)
+scripts/check-campaigns.py
+scripts/detailed-campaign-check.py
+scripts/direct-update-campaigns.py
+scripts/update-campaign-status.py
+
+*.zip

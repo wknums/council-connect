@@ -1,1 +1,12 @@
 .venv
+experiments/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+temp_admin_endpoint.py
+# Campaign data fix scripts (local maintenance only)
+../scripts/check-campaigns.py
+../scripts/detailed-campaign-check.py
+../scripts/direct-update-campaigns.py
+../scripts/update-campaign-status.py

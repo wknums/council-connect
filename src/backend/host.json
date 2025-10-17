@@ -11,5 +11,15 @@
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
     "version": "[4.*, 5.0.0)"
+  },
+  "cors": {
+    "allowCredentials": true,
+    "allowedOrigins": [
+      "http://localhost:5000",
+      "http://localhost:5173",
+      "https://localhost:5000",
+      "https://localhost:5173",
+      "https://councilconnect-munic-web-gwawevemb0exffhv.uksouth-01.azurewebsites.net"
+    ]
   }
 }

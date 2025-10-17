@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Envelope, Users, ChartBar, Gear, Plus } from '@phosphor-icons/react'
 import { EmailComposer } from '@/components/email/EmailComposer'
@@ -11,9 +10,9 @@ import { Settings } from '@/components/settings/Settings'
 import { Toaster } from '@/components/ui/sonner'
 import { Logo } from '@/components/ui/Logo'
 import { AzureLogo } from '@/components/ui/AzureLogo'
-import { useKV } from '@github/spark/hooks'
 import { useOptionalKV } from '@/hooks/useOptionalKV'
 import { getCouncillorKey } from '@/lib/utils'
+import { useAuth } from '@/auth/AuthProvider'
 
 interface UserProfile {
   name: string
@@ -29,6 +28,7 @@ function App() {
   const [user] = useOptionalKV<UserProfile | null>(getCouncillorKey('user-profile'), null)
   const [isUnsubscribePage, setIsUnsubscribePage] = useState(false)
   const [unsubscribeParams, setUnsubscribeParams] = useState<{trackingId?: string, email?: string, campaignId?: string, contactId?: string, councillorId?: string}>({})
+  const { account, councillorId, wardId, signOut, bypassed } = useAuth()
 
   // Check URL for unsubscribe parameters
   useEffect(() => {
@@ -56,6 +56,9 @@ function App() {
     return <UnsubscribePage {...unsubscribeParams} />
   }
 
+  const headerName = useMemo(() => user?.name || account?.name || account?.username || 'Signed-in user', [user, account])
+  const headerWard = useMemo(() => wardId || user?.ward || councillorId, [user, wardId, councillorId])
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card px-6 py-4">
@@ -71,11 +74,14 @@ function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {user && (
-              <div className="text-right">
-                <p className="font-medium text-foreground">{user.name}</p>
-                <p className="text-sm text-muted-foreground">{user.ward}</p>
-              </div>
+            <div className="text-right">
+              <p className="font-medium text-foreground">{headerName}</p>
+              <p className="text-sm text-muted-foreground">{headerWard}</p>
+            </div>
+            {!bypassed && (
+              <Button variant="outline" size="sm" onClick={() => void signOut()}>
+                Sign out
+              </Button>
             )}
           </div>
         </div>

@@ -1,0 +1,27 @@
+name: councilconnect-munic
+metadata:
+  template: councilconnect-munic
+services:
+  frontend:
+    project: .
+    language: ts
+    host: appservice
+    configuration:
+      appArtifactLocation: dist
+    hooks:
+      install:
+        shell: npm install
+      build:
+        shell: npm run build
+  api:
+    project: src/backend
+    language: python
+    host: function
+    hooks:
+      install:
+        shell: pip install -r requirements.txt
+infra:
+  provider: bicep
+  path: infra
+  parameters:
+    - infra/main.parameters.json

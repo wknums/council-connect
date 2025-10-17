@@ -122,6 +122,7 @@ def dispatch_campaign_emails(councillor_id: str, campaign_doc: Dict[str, Any]) -
                 "recipients": {
                     "to": [{"address": address}],
                 },
+                "userEngagementTrackingDisabled": False,  # Enable ACS built-in engagement tracking
             }
             if html_body:
                 message_payload["content"]["html"] = html_body

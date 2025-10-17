@@ -9,6 +9,8 @@ import json
 import os
 import logging
 import azure.functions as func
+from auth_guard import require_councillor, require_auth, AuthenticationError, AuthorizationError
+from functools import wraps
 
 # Support both execution contexts:
 # 1. Azure Functions host adds this directory to sys.path so absolute import works.
@@ -43,18 +45,45 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
 def _json(body: dict, status: int = 200) -> func.HttpResponse:
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-councillor-id",
+    }
     return func.HttpResponse(
         body=json.dumps(body),
         mimetype="application/json",
         status_code=status,
+        headers=headers,
     )
 
 
 def _require_councillor(req: func.HttpRequest):
-    cid = req.headers.get("x-councillor-id") or req.params.get("councillorId")
-    if not cid:
-        raise ValueError("Missing councillor identifier (x-councillor-id header)")
-    return cid
+    """Legacy wrapper - use require_councillor from auth_guard instead."""
+    try:
+        return require_councillor(req)
+    except (AuthenticationError, AuthorizationError) as e:
+        raise ValueError(str(e))
+
+
+def authenticated_route(func_handler):
+    """Decorator to handle authentication for route handlers."""
+    @wraps(func_handler)
+    def wrapper(req: func.HttpRequest) -> func.HttpResponse:
+        try:
+            return func_handler(req)
+        except ValueError as e:
+            error_msg = str(e)
+            if any(keyword in error_msg for keyword in ["Missing authorization token", "Invalid token", "Authentication required"]):
+                return _json({"error": "Authentication required"}, 401)
+            elif "authorization" in error_msg.lower() or "permission" in error_msg.lower():
+                return _json({"error": "Access denied"}, 403)
+            return _json({"error": error_msg}, 400)
+        except (AuthenticationError, AuthorizationError) as e:
+            if isinstance(e, AuthenticationError):
+                return _json({"error": "Authentication required"}, 401)
+            return _json({"error": "Access denied"}, 403)
+    return wrapper
 
 
 OPENAPI_SPEC = {
@@ -71,8 +100,9 @@ OPENAPI_SPEC = {
     "/campaigns/{campaignId}/metrics": {"get": {"summary": "Campaign metrics"}},
     "/campaigns/{campaignId}/recipients": {"get": {"summary": "Campaign recipients (debug)"}},
         "/track/open": {"post": {"summary": "Record open event"}},
-    "/track/pixel": {"get": {"summary": "Email open tracking pixel"}},
+        "/track/pixel": {"get": {"summary": "Email open tracking pixel"}},
         "/track/unsubscribe": {"post": {"summary": "Record unsubscribe event"}},
+        "/unsubscribe": {"get": {"summary": "Direct unsubscribe page for email links"}},
         "/unsubscribes": {
             "get": {"summary": "List unsubscribed emails"},
             "post": {"summary": "Add email to unsubscribe list"},
@@ -85,6 +115,18 @@ OPENAPI_SPEC = {
         "/docs": {"get": {"summary": "Docs HTML"}},
     },
 }
+
+
+@app.route(route="{*path}", methods=["OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+def handle_preflight(req: func.HttpRequest) -> func.HttpResponse:
+    """Handle CORS preflight requests for all routes."""
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-councillor-id",
+        "Access-Control-Max-Age": "86400"
+    }
+    return func.HttpResponse(status_code=200, headers=headers)
 
 
 @app.route(route="openapi.json", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -114,12 +156,10 @@ def docs(req: func.HttpRequest) -> func.HttpResponse:  # pragma: no cover
 
 
 @app.route(route="distribution-lists", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@authenticated_route
 def distribution_lists(req: func.HttpRequest) -> func.HttpResponse:
     repo = CosmosRepository()
-    try:
-        cid = _require_councillor(req)
-    except ValueError as e:
-        return _json({"error": str(e)}, 400)
+    cid = _require_councillor(req)
     if req.method == "GET":
         return _json({"items": repo.list_distribution_lists(cid)})
     # POST
@@ -209,60 +249,7 @@ def add_contact(req: func.HttpRequest) -> func.HttpResponse:
     return _json(contact, 201)
 
 
-@app.route(route="campaigns_ori", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
-async def campaigns_ori(req: func.HttpRequest) -> func.HttpResponse:
-    repo = CosmosRepository()
-    try:
-        cid = _require_councillor(req)
-    except ValueError as e:
-        return _json({"error": str(e)}, 400)
-    if req.method == "GET":
-        return _json({"items": repo.list_campaigns(cid)})
-    try:
-        data = req.get_json()
-    except Exception:  # noqa: BLE001
-        return _json({"error": "Invalid JSON"}, 400)
-    subject = (data.get("subject") or "").strip()
-    content = data.get("content") or ""
-    list_ids = data.get("listIds") or []
-    attachments = data.get("attachments") or []  # [{ name, contentType, base64 }]
-    if not (subject and content and list_ids):
-        return _json({"error": "subject, content, listIds required"}, 400)
-    campaign_doc = repo.create_campaign(cid, subject, content, list_ids)
-    if attachments:
-        # Store attachment metadata (do NOT leave large base64 in doc long-term)
-        meta = []
-        for a in attachments:
-            if not (a.get("name") and a.get("contentType") and a.get("base64")):
-                continue
-            meta.append({
-                "name": a["name"],
-                "contentType": a["contentType"],
-                "sizeBytes": len(a["base64"]) * 3 // 4  # approximate decoded size
-            })
-        campaign_doc["attachments"] = meta
-        # Pass raw attachments to dispatch via transient field
-        campaign_doc["_attachments_raw"] = attachments
-    enable_inline = os.getenv("ENABLE_INLINE_SEND", "true").lower() in {"1", "true", "yes"}
-    async_mode = os.getenv("ENABLE_ASYNC_SEND", "true").lower() in {"1", "true", "yes"}
-    if enable_inline:
-        try:
-            if async_mode and dispatch_campaign_emails_async:
-                campaign_doc = await dispatch_campaign_emails_async(cid, campaign_doc)
-            elif dispatch_campaign_emails:  # fallback sync
-                campaign_doc = dispatch_campaign_emails(cid, campaign_doc)
-            else:
-                campaign_doc["dispatchState"] = "queued"
-        except Exception as e:  # pragma: no cover
-            logging.error("Email dispatch failed: %s", e)
-            campaign_doc["dispatchState"] = "error"
-            campaign_doc["dispatchError"] = str(e)
-    else:
-        campaign_doc["dispatchState"] = "queued"
-    campaign_doc.setdefault("pendingCount", campaign_doc.get("totalTargeted", 0))
-    # Remove transient raw attachments if present
-    campaign_doc.pop("_attachments_raw", None)
-    return _json(campaign_doc, 201)
+
 
 @app.route(route="campaigns", methods=["GET", "POST"], auth_level=func.AuthLevel.ANONYMOUS)
 async def campaigns(req: func.HttpRequest) -> func.HttpResponse:
@@ -433,6 +420,121 @@ def track_pixel(req: func.HttpRequest) -> func.HttpResponse:
         except Exception:  # noqa: BLE001
             pass  # Never raise to client for pixel
     return func.HttpResponse(body=_PIXEL_BYTES, mimetype="image/gif", status_code=200, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.route(route="unsubscribe", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def unsubscribe_page(req: func.HttpRequest) -> func.HttpResponse:
+    """Direct unsubscribe endpoint for email links.
+    
+    Expects query params: campaignId, contactId, councillorId
+    Looks up email from contact and processes unsubscribe, returns confirmation message.
+    """
+    repo = CosmosRepository()
+    
+    # Extract parameters from query string
+    campaign_id = req.params.get("campaignId", "").strip()
+    contact_id = req.params.get("contactId", "").strip()
+    councillor_id = req.params.get("councillorId", "").strip()
+    
+    if not (campaign_id and contact_id and councillor_id):
+        return func.HttpResponse(
+            "<html><body><h1>Invalid Request</h1><p>Campaign ID, Contact ID, and Councillor ID are required.</p></body></html>",
+            mimetype="text/html",
+            status_code=400
+        )
+    
+    try:
+        # Look up the contact to get the email address
+        contacts = repo.list_contacts(councillor_id)
+        contact = next((c for c in contacts if c["id"] == contact_id), None)
+        
+        if not contact:
+            return func.HttpResponse(
+                "<html><body><h1>Contact Not Found</h1><p>The specified contact could not be found.</p></body></html>",
+                mimetype="text/html",
+                status_code=404
+            )
+        
+        email = contact.get("email", "").strip()
+        if not email:
+            return func.HttpResponse(
+                "<html><body><h1>No Email Found</h1><p>No email address associated with this contact.</p></body></html>",
+                mimetype="text/html",
+                status_code=400
+            )
+        
+        # Record unsubscribe event
+        repo.record_tracking_event(councillor_id, campaign_id, contact_id, "unsubscribe", req.headers.get("user-agent"))
+        
+        # Add email to unsubscribe list
+        try:
+            repo.add_unsubscribe_email(councillor_id, email, campaign_id=campaign_id, contact_id=contact_id, source="tracking")
+        except ValueError:
+            # Email might already be unsubscribed, that's OK
+            pass
+        
+        # Return success page
+        html_response = f"""
+        <html>
+        <head>
+            <title>Unsubscribed Successfully</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
+                .container {{ background: white; padding: 30px; border-radius: 8px; max-width: 500px; margin: 0 auto; }}
+                h1 {{ color: #2563eb; }}
+                p {{ color: #6b7280; line-height: 1.6; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>✓ Unsubscribed Successfully</h1>
+                <p>The email address <strong>{email}</strong> has been unsubscribed from future communications.</p>
+                <p>You will no longer receive emails from this municipal office.</p>
+                <p>If you have any questions, please contact your local council office directly.</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return func.HttpResponse(
+            html_response,
+            mimetype="text/html",
+            status_code=200
+        )
+        
+    except Exception as e:
+        # Return error page
+        error_html = f"""
+        <html>
+        <head>
+            <title>Unsubscribe Error</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
+                .container {{ background: white; padding: 30px; border-radius: 8px; max-width: 500px; margin: 0 auto; }}
+                h1 {{ color: #dc2626; }}
+                p {{ color: #6b7280; line-height: 1.6; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>⚠ Unsubscribe Error</h1>
+                <p>We encountered an error processing your unsubscribe request.</p>
+                <p>Please try again later or contact your local council office directly.</p>
+                <p><small>Error: {str(e)}</small></p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return func.HttpResponse(
+            error_html,
+            mimetype="text/html",
+            status_code=500
+        )
 
 
 @app.route(route="track/unsubscribe", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)

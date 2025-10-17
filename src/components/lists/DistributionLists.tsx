@@ -58,6 +58,8 @@ export function DistributionLists() {
   const downloadHrefRefs = useRef<Record<string, HTMLAnchorElement | null>>({})
   const [importStatus, setImportStatus] = useState<Record<string, { total: number; completed: number; pending: number; skippedDuplicates: number; skippedInvalid: number }>>({})
   const [importingLists, setImportingLists] = useState<Record<string, boolean>>({})
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false)
+  const [loadingProgress, setLoadingProgress] = useState({ loaded: 0, total: 0, contactsLoaded: 0 })
 
   const kvTestMode = (import.meta as any).env?.VITE_FE_TEST_KV === 'true'
 
@@ -94,27 +96,67 @@ export function DistributionLists() {
   useEffect(() => {
     if (kvTestMode) return
     let cancelled = false
-    apiClient.listDistributionLists()
-      .then(async r => {
-        const lists = r.items
-        // Fetch contacts per list in parallel
-        const enriched = await Promise.all(lists.map(async l => {
+    
+  const loadListsWithProgress = async () => {
+    let lastProgressUpdate = 0
+    try {
+      setIsLoadingContacts(true)
+      const r = await apiClient.listDistributionLists()
+      const lists = r.items
+      
+      if (lists.length === 0) {
+          setDistributionLists([])
+          setIsLoadingContacts(false)
+          return
+        }
+        
+        setLoadingProgress({ loaded: 0, total: lists.length, contactsLoaded: 0 })
+        
+        // Fetch contacts per list sequentially to show progress
+        const enriched = []
+        let totalContactsLoaded = 0
+        
+        for (let i = 0; i < lists.length; i++) {
+          if (cancelled) break
+          
+          const l = lists[i]
           try {
             const resp = await apiClient.listContactsForList(l.id)
-            return { ...l, contacts: resp.items }
+            const contacts = resp.items || []
+            enriched.push({ ...l, contacts })
+            totalContactsLoaded += contacts.length
           } catch {
-            return { ...l, contacts: [] }
+            enriched.push({ ...l, contacts: [] })
           }
-        }))
+          
+          // Update progress every 5 seconds or on completion
+          const now = Date.now()
+          if (!lastProgressUpdate || now - lastProgressUpdate >= 5000 || i === lists.length - 1) {
+            setLoadingProgress({ loaded: i + 1, total: lists.length, contactsLoaded: totalContactsLoaded })
+            lastProgressUpdate = now
+          }
+        }
+        
         if (!cancelled) {
           setDistributionLists(enriched as any)
           ensureListUiState(enriched as any)
         }
-      })
-      .catch(err => {
+      } catch (err) {
         console.error('List fetch failed', err)
-        toast.error('Failed to load distribution lists')
-      })
+        if (err.message.includes('Backend unavailable')) {
+          toast.info('Backend API unavailable - using local storage mode. Data will be saved locally until backend is deployed.')
+        } else {
+          toast.error('Failed to load distribution lists')
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingContacts(false)
+          setLoadingProgress({ loaded: 0, total: 0, contactsLoaded: 0 })
+        }
+      }
+    }
+    
+    loadListsWithProgress()
     return () => { cancelled = true }
   }, [kvTestMode, setDistributionLists])
 
@@ -535,9 +577,21 @@ export function DistributionLists() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold">Distribution Lists</h2>
-          <p className="text-muted-foreground">Manage your constituent contact lists</p>
+        <div className="flex-1">
+          <div className="flex items-center gap-4">
+            <div>
+              <h2 className="text-2xl font-bold">Distribution Lists</h2>
+              <p className="text-muted-foreground">Manage your constituent contact lists</p>
+            </div>
+            {isLoadingContacts && (
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <div className="w-48">
+                  <Progress value={(loadingProgress.loaded / Math.max(loadingProgress.total, 1)) * 100} className="h-2" />
+                </div>
+                <span>Loading contacts... {loadingProgress.contactsLoaded} contacts from {loadingProgress.loaded}/{loadingProgress.total} lists</span>
+              </div>
+            )}
+          </div>
         </div>
         <Dialog open={isCreating} onOpenChange={setIsCreating}>
           <DialogTrigger asChild>

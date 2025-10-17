@@ -15,8 +15,10 @@ export interface EmailMetrics {
   totalOpened: number
   totalUnsubscribed: number
   openRate: number
+  uniqueOpenRate: number
   unsubscribeRate: number
   opens: EmailTrackingData[]
+  uniqueOpens: EmailTrackingData[]
   unsubscribes: EmailTrackingData[]
 }
 
@@ -32,19 +34,41 @@ export function generateTrackingId(emailId: string, recipientEmail: string): str
 /**
  * Creates an unsubscribe URL for a specific email/recipient
  */
-export function createUnsubscribeUrl(emailId: string, recipientEmail: string): string {
-  const trackingId = generateTrackingId(emailId, recipientEmail)
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://municipal-email.local'
-  return `${baseUrl}/unsubscribe?id=${trackingId}&email=${encodeURIComponent(recipientEmail)}`
+export function createUnsubscribeUrl(emailId: string, recipientEmail: string, campaignId?: string, contactId?: string, councillorId?: string): string {
+  // Use the configured API base URL, fallback to localhost development API
+  const configuredApiUrl = (import.meta as any).env?.VITE_API_BASE_URL
+  const apiBaseUrl = configuredApiUrl || 'http://localhost:7071/api'
+  
+  // Build query parameters
+  const params = new URLSearchParams({
+    email: recipientEmail
+  })
+  
+  if (campaignId) params.set('campaignId', campaignId)
+  if (contactId) params.set('contactId', contactId)
+  if (councillorId) params.set('councillorId', councillorId)
+  
+  return `${apiBaseUrl}/unsubscribe?${params.toString()}`
 }
 
 /**
  * Creates a tracking pixel URL for email open tracking
  */
-export function createTrackingPixelUrl(emailId: string, recipientEmail: string): string {
-  const trackingId = generateTrackingId(emailId, recipientEmail)
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://municipal-email.local'
-  return `${baseUrl}/track/open?id=${trackingId}&email=${encodeURIComponent(recipientEmail)}`
+export function createTrackingPixelUrl(emailId: string, recipientEmail: string, campaignId?: string, contactId?: string, councillorId?: string): string {
+  // Use the configured API base URL, fallback to localhost development API
+  const configuredApiUrl = (import.meta as any).env?.VITE_API_BASE_URL
+  const apiBaseUrl = configuredApiUrl || 'http://localhost:7071/api'
+  
+  // Build query parameters for tracking pixel
+  const params = new URLSearchParams({
+    email: recipientEmail
+  })
+  
+  if (campaignId) params.set('campaignId', campaignId)
+  if (contactId) params.set('contactId', contactId) 
+  if (councillorId) params.set('councillorId', councillorId)
+  
+  return `${apiBaseUrl}/track/pixel?${params.toString()}`
 }
 
 /**
@@ -54,10 +78,13 @@ export function processEmailContent(
   content: string, 
   emailId: string, 
   recipientEmail: string,
-  userProfile?: { name?: string; ward?: string }
+  userProfile?: { name?: string; ward?: string },
+  campaignId?: string,
+  contactId?: string,
+  councillorId?: string
 ): string {
-  const unsubscribeUrl = createUnsubscribeUrl(emailId, recipientEmail)
-  const trackingPixelUrl = createTrackingPixelUrl(emailId, recipientEmail)
+  const unsubscribeUrl = createUnsubscribeUrl(emailId, recipientEmail, campaignId, contactId, councillorId)
+  const trackingPixelUrl = createTrackingPixelUrl(emailId, recipientEmail, campaignId, contactId, councillorId)
   
   // Add tracking pixel (1x1 transparent image)
   const trackingPixel = `<img src="${trackingPixelUrl}" width="1" height="1" style="display:block;border:0;outline:none;text-decoration:none;" alt="" />`
@@ -176,8 +203,10 @@ export async function getEmailMetrics(emailId: string, totalSent: number): Promi
       totalOpened: 0,
       totalUnsubscribed: 0,
       openRate: 0,
+      uniqueOpenRate: 0,
       unsubscribeRate: 0,
       opens: [],
+      uniqueOpens: [],
       unsubscribes: []
     }
   }
@@ -188,14 +217,26 @@ export async function getEmailMetrics(emailId: string, totalSent: number): Promi
   const opens = await window.spark.kv.get<EmailTrackingData[]>(opensKey) || []
   const unsubscribes = await window.spark.kv.get<EmailTrackingData[]>(unsubscribesKey) || []
   
+  // Calculate unique opens by email address (one open per recipient)
+  const uniqueOpensMap = new Map<string, EmailTrackingData>()
+  opens.forEach(open => {
+    const key = open.recipientEmail
+    if (!uniqueOpensMap.has(key) || new Date(open.openedAt || '') < new Date(uniqueOpensMap.get(key)!.openedAt || '')) {
+      uniqueOpensMap.set(key, open)
+    }
+  })
+  const uniqueOpens = Array.from(uniqueOpensMap.values())
+
   return {
     emailId,
     totalSent,
     totalOpened: opens.length,
     totalUnsubscribed: unsubscribes.length,
     openRate: totalSent > 0 ? (opens.length / totalSent) * 100 : 0,
+    uniqueOpenRate: totalSent > 0 ? (uniqueOpens.length / totalSent) * 100 : 0,
     unsubscribeRate: totalSent > 0 ? (unsubscribes.length / totalSent) * 100 : 0,
     opens,
+    uniqueOpens,
     unsubscribes
   }
 }

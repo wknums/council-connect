@@ -242,9 +242,9 @@ class CosmosRepository:
         if not base_html.strip().lower().startswith("<html"):
             base_html = f"<html><body>{base_html}</body></html>"
         pixel_path = f"/api/track/pixel?councillorId={councillor_id}&campaignId={campaign_placeholder}&contactId={tracking_placeholder}"
-        unsubscribe_path = f"{UNSUBSCRIBE_PATH}?councillorId={councillor_id}&campaignId={campaign_placeholder}&contactId={tracking_placeholder}"
+        unsubscribe_path = f"/api/unsubscribe?councillorId={councillor_id}&campaignId={campaign_placeholder}&contactId={tracking_placeholder}"
         pixel_src = _build_public_url(TRACKING_BASE_URL, pixel_path)
-        unsubscribe_href = _build_public_url(UNSUBSCRIBE_BASE_URL, unsubscribe_path)
+        unsubscribe_href = _build_public_url(TRACKING_BASE_URL, unsubscribe_path)
         pixel_tag = f"<img alt=\"\" style=\"display:none;width:1px;height:1px;\" src=\"{pixel_src}\" />"
         unsubscribe_anchor = (
             "<p style=\"margin-top:16px;font-size:12px;color:#666;\">If you no longer wish to receive these emails "
@@ -378,7 +378,8 @@ class CosmosRepository:
         camp = next((item for item in self.list_campaigns(councillor_id) if item["id"] == campaign_id), None)
         filtered_unsub = camp.get("totalFilteredUnsubscribed", 0) if camp else 0
 
-        rate_denominator = total_targeted or 1
+        rate_denominator = total_sent + total_pending or 1  # Use sent + pending for open rate calculation
+        unique_opens_count = len(unique_open_contacts)
         return {
             "campaignId": campaign_id,
             "totalTargeted": total_targeted,
@@ -387,11 +388,12 @@ class CosmosRepository:
             "totalPending": total_pending,
             "totalFilteredUnsubscribed": filtered_unsub,
             "totalOpens": total_opens,
-            "uniqueOpens": len(unique_open_contacts),
+            "uniqueOpens": unique_opens_count,
             "totalUnsubscribes": total_unsubs,
             "uniqueUnsubscribes": len(unique_unsubs),
-            "openRate": (total_opens / rate_denominator * 100) if total_targeted else 0,
-            "unsubscribeRate": (total_unsubs / rate_denominator * 100) if total_targeted else 0,
+            "openRate": (total_opens / rate_denominator * 100) if rate_denominator else 0,
+            "uniqueOpenRate": (unique_opens_count / rate_denominator * 100) if rate_denominator else 0,
+            "unsubscribeRate": (total_unsubs / rate_denominator * 100) if rate_denominator else 0,
             "deliveryStatusBreakdown": delivery_status_counts,
         }
 

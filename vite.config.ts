@@ -34,14 +34,20 @@ export default defineConfig({
     localSparkHealthcheck(),
   ],
   server: {
+    port: 5000,
+    host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:7071',
+        target: `http://${process.env.VITE_API_HOST || 'localhost'}:${process.env.VITE_API_PORT || '7071'}`,
         changeOrigin: true,
         // Azure Functions local host sometimes redirects; ensure websockets disabled for plain HTTP
         ws: false,
       }
     }
+  },
+  preview: {
+    port: 5000,
+    host: true
   },
   resolve: {
     alias: {

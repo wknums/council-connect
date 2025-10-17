@@ -62,10 +62,17 @@ export function UnsubscribePage({ trackingId, email: initialEmail, campaignId, c
           await recordUnsubscribe(trackingId, email)
         }
       } else {
+        // Always add to unsubscribe list regardless of tracking info
+        await apiClient.addUnsubscribe({ email })
+        
+        // Additionally record tracking event if we have campaign/contact info
         if (campaignId && contactId) {
-          await apiClient.recordUnsubscribeEvent({ campaignId, contactId })
-        } else {
-          await apiClient.addUnsubscribe({ email })
+          try {
+            await apiClient.recordUnsubscribeEvent({ campaignId, contactId })
+          } catch (err) {
+            console.warn('Failed to record unsubscribe tracking event:', err)
+            // Don't fail the unsubscribe if tracking fails
+          }
         }
       }
 
