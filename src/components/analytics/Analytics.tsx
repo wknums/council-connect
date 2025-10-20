@@ -55,7 +55,8 @@ interface BackendMetricSnapshot {
 export function Analytics() {
   const kvTestMode = (import.meta as any).env?.VITE_FE_TEST_KV === 'true'
   const [drafts] = useOptionalKV<LocalEmailDraft[]>(getCouncillorKey('email-drafts'), [])
-  const [distributionLists] = useOptionalKV<any[]>(getCouncillorKey('distribution-lists'), [])
+  const [kvDistributionLists] = useOptionalKV<any[]>(getCouncillorKey('distribution-lists'), [])
+  const [distributionLists, setDistributionLists] = useState<any[]>([])
   const [unsubscribedEmails] = useOptionalKV<string[]>(getCouncillorKey('unsubscribed-emails'), [])
   const [emailMetrics, setEmailMetrics] = useState<TrackingEmailMetrics[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -71,14 +72,36 @@ export function Analytics() {
     if (kvTestMode) return
     try {
       setIsLoading(true)
-      const [campaignResponse, unsubscribeResponse] = await Promise.all([
+      const [campaignResponse, unsubscribeResponse, distributionListsResponse] = await Promise.all([
         apiClient.listCampaigns(),
-        apiClient.listUnsubscribes()
+        apiClient.listUnsubscribes(),
+        apiClient.listDistributionLists()
       ])
       const items = campaignResponse.items
       // Basic sort by createdAt desc (API already does, but enforce client side too)
       const sorted = [...items].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
       setBackendCampaigns(sorted as CampaignDoc[])
+      
+      // Set distribution lists from API and fetch contacts for each list
+      const listsWithContacts = await Promise.all(
+        (distributionListsResponse.items || []).map(async (list: any) => {
+          try {
+            const contactsResponse = await apiClient.listContactsForList(list.id)
+            return {
+              ...list,
+              contacts: contactsResponse.items || []
+            }
+          } catch (err) {
+            console.warn('Failed to fetch contacts for list', list.id, err)
+            return {
+              ...list,
+              contacts: []
+            }
+          }
+        })
+      )
+      setDistributionLists(listsWithContacts)
+      
       const unsubscribeEntries = (unsubscribeResponse.items || []).map(entry => ({
         ...entry,
         displayEmail: entry.displayEmail || entry.email
@@ -135,6 +158,13 @@ export function Analytics() {
     }
   }, [kvTestMode, fetchBackendCampaigns])
 
+  // Load distribution lists in KV mode
+  useEffect(() => {
+    if (kvTestMode) {
+      setDistributionLists(kvDistributionLists || [])
+    }
+  }, [kvTestMode, kvDistributionLists])
+
   // Load local (KV) email metrics (only in test mode)
   useEffect(() => {
     if (!kvTestMode) return
@@ -155,8 +185,55 @@ export function Analytics() {
     loadMetrics()
   }, [sentEmails, kvTestMode])
 
+  // Calculate unique recipients across all campaigns
+  const calculateUniqueRecipients = () => {
+    const uniqueEmails = new Set<string>()
+    
+    console.log('Calculating unique recipients...', { kvTestMode, distributionListsCount: distributionLists.length })
+    
+    if (kvTestMode) {
+      // In KV mode, calculate from sent emails and their recipient data
+      sentEmails.forEach(email => {
+        // Get contacts from selected lists for this email
+        (email.selectedLists || []).forEach(listId => {
+          const list = distributionLists.find(l => l.id === listId)
+          if (list?.contacts) {
+            list.contacts.forEach((contact: any) => {
+              if (contact.email && !unsubscribedEmails.includes(contact.email)) {
+                uniqueEmails.add(contact.email.toLowerCase())
+              }
+            })
+          }
+        })
+      })
+    } else {
+      // In backend mode, collect all contacts from distribution lists
+      // and filter out unsubscribed emails to get the true unique recipient count
+      distributionLists.forEach(list => {
+        console.log('Processing list:', list.name, 'contacts:', list.contacts?.length || 0)
+        if (list?.contacts) {
+          list.contacts.forEach((contact: any) => {
+            if (contact?.email) {
+              const email = contact.email.toLowerCase()
+              // Check if this email is unsubscribed
+              const isUnsubscribed = backendUnsubscribes.some(unsub => 
+                (unsub.email || unsub.displayEmail || '').toLowerCase() === email
+              )
+              if (!isUnsubscribed) {
+                uniqueEmails.add(email)
+              }
+            }
+          })
+        }
+      })
+    }
+    
+    console.log('Unique recipients calculated:', uniqueEmails.size, 'from', distributionLists.length, 'lists')
+    return uniqueEmails.size
+  }
+
   // Aggregate stats: choose source depending on mode
-  let totalRecipients = (distributionLists || []).reduce((total, list) => total + (list.contacts?.length || 0), 0)
+  let totalRecipients = calculateUniqueRecipients()
   const totalUnsubscribed = kvTestMode ? (unsubscribedEmails || []).length : backendUnsubscribes.length
   let totalSentCampaigns = 0
   let totalOpens = 0
@@ -199,13 +276,13 @@ export function Analytics() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Recipients</CardTitle>
+            <CardTitle className="text-sm font-medium">Unique Recipients</CardTitle>
             <Users size={16} className="text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalRecipients.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">
-              Across {(distributionLists || []).length} lists
+              Active contacts across {(distributionLists || []).length} lists
             </p>
           </CardContent>
         </Card>
